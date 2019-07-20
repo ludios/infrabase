@@ -25,7 +25,6 @@ fn main() {
     let connection = establish_connection();
 
     let results = machines
-        .limit(5)
         .load::<Machine>(&connection)
         .expect("Error loading machines");
 
