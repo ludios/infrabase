@@ -70,10 +70,7 @@ enum Opt {
 fn main() {
     env_logger::init();
 
-    warn!("warning message");
-
     let matches = Opt::from_args();
-
     match matches {
         Opt::SshConfig => {
             print_ssh_config();
