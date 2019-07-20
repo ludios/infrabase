@@ -11,3 +11,16 @@ pub struct Machine {
     pub ssh_user: String,
     pub added_time: DateTime<Utc>,
 }
+
+#[derive(Queryable, Debug)]
+pub struct MachineAddress {
+    pub hostname: String,
+    pub network: String,
+    pub address: IpNetwork,
+}
+
+#[derive(Queryable, Debug)]
+pub struct Network {
+    pub name: String,
+    pub parent: String,
+}
