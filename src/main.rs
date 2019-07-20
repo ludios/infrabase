@@ -3,6 +3,8 @@ pub mod models;
 
 #[macro_use]
 extern crate diesel;
+#[macro_use]
+extern crate log;
 
 use diesel::prelude::*;
 use diesel::pg::PgConnection;
@@ -66,6 +68,10 @@ enum Opt {
 }
 
 fn main() {
+    env_logger::init();
+
+    warn!("warning message");
+
     let matches = Opt::from_args();
 
     match matches {
