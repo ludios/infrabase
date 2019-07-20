@@ -64,7 +64,7 @@ fn print_ssh_config() {
 enum Opt {
     #[structopt(name = "ssh_config")]
     /// Prints an ~/.ssh/config that lists all machines
-    SshConfig {},
+    SshConfig,
 }
 
 fn main() {
@@ -75,7 +75,7 @@ fn main() {
     let matches = Opt::from_args();
 
     match matches {
-        Opt::SshConfig {} => {
+        Opt::SshConfig => {
             print_ssh_config();
         }
     }
