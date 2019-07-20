@@ -1,5 +1,5 @@
 [package]
-name = "machine-inventory"
+name = "infrabase"
 version = "0.1.0"
 authors = ["Ivan Kozik <ivan@ludios.org>"]
 edition = "2018"
