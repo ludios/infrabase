@@ -10,7 +10,7 @@ extern crate log;
 
 use diesel::prelude::*;
 use diesel::pg::PgConnection;
-use dotenv::dotenv;
+use dotenv;
 use std::env;
 use structopt::StructOpt;
 use indoc::indoc;
@@ -19,7 +19,9 @@ use models::{Machine, MachineAddress};
 use schema::machines::dsl::*;
 
 fn establish_connection() -> PgConnection {
-    dotenv().ok();
+    let dirs = xdg::BaseDirectories::with_prefix("infrabase").unwrap();
+    let path = dirs.find_config_file("env").expect("Could not find ~/.config/infrabase/env");
+    dotenv::from_path(&path).ok();
 
     let database_url = env::var("DATABASE_URL")
         .expect("DATABASE_URL must be set");
