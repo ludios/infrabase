@@ -1,13 +1,27 @@
-CREATE DOMAIN hostname         AS varchar(32) CHECK (VALUE ~ '\A[-_a-z0-9]+\Z');
-CREATE DOMAIN netname          AS varchar(32) CHECK (VALUE ~ '\A[-_a-z0-9]+\Z');
-CREATE DOMAIN port             AS integer     CHECK (VALUE > 0 AND VALUE <= 65536);
-CREATE DOMAIN wireguard_key    AS varchar(44) CHECK (length(VALUE) = 44);
+CREATE DOMAIN hostname       AS varchar(32)  CHECK (VALUE ~ '\A[-_a-z0-9]+\Z');
+CREATE DOMAIN netname        AS varchar(32)  CHECK (VALUE ~ '\A[-_a-z0-9]+\Z');
+CREATE DOMAIN port           AS integer      CHECK (VALUE > 0 AND VALUE <= 65536);
+CREATE DOMAIN wireguard_key  AS varchar(44)  CHECK (length(VALUE) = 44);
  -- Match default /etc/adduser.conf NAME_REGEX
-CREATE DOMAIN username         AS varchar(32) CHECK (VALUE ~ '\A[a-z][-a-z0-9_]{1,31}\Z');
+CREATE DOMAIN username       AS varchar(32)  CHECK (VALUE ~ '\A[a-z][-a-z0-9_]{1,31}\Z');
+CREATE DOMAIN email          AS varchar(254) CHECK (VALUE ~ '\A.+@.+\Z');
 
+-- a tree of networks; sub-network is assumed to be able to reach parent networks
 CREATE TABLE networks (
-	name   netname NOT NULL PRIMARY KEY,
-	parent netname REFERENCES networks(name) CHECK (parent != name)
+	name    netname NOT NULL PRIMARY KEY,
+	parent  netname REFERENCES networks(name) CHECK (parent != name)
+);
+
+-- hosting accounts
+CREATE TABLE providers (
+    name   varchar(32) NOT NULL,
+    email  email       NOT NULL,
+    PRIMARY KEY (name, email)
+);
+
+-- who owns the machine?
+CREATE TABLE owners (
+    owner  varchar(32) NOT NULL PRIMARY KEY
 );
 
 CREATE TABLE machines (
@@ -29,9 +43,9 @@ CREATE TABLE machines (
 );
 
 CREATE TABLE machine_addresses (
-	hostname hostname NOT NULL REFERENCES machines,
-	network  netname  NOT NULL REFERENCES networks(name),
-	address  inet     NOT NULL,
+	hostname  hostname NOT NULL REFERENCES machines,
+	network   netname  NOT NULL REFERENCES networks(name),
+	address   inet     NOT NULL,
 	PRIMARY KEY (hostname, network, address)
 	-- (network, address) isn't necessarily unique; several machines may share the same address but have different ports
 );
