@@ -15,6 +15,8 @@ table! {
         ssh_port -> Int4,
         ssh_user -> Varchar,
         added_time -> Timestamptz,
+        owner -> Varchar,
+        provider_id -> Nullable<Int4>,
     }
 }
 
@@ -25,11 +27,29 @@ table! {
     }
 }
 
+table! {
+    owners (owner) {
+        owner -> Varchar,
+    }
+}
+
+table! {
+    providers (id) {
+        id -> Int4,
+        name -> Varchar,
+        email -> Varchar,
+    }
+}
+
 joinable!(machine_addresses -> machines (hostname));
 joinable!(machine_addresses -> networks (network));
+joinable!(machines -> owners (owner));
+joinable!(machines -> providers (provider_id));
 
 allow_tables_to_appear_in_same_query!(
     machine_addresses,
     machines,
     networks,
+    owners,
+    providers,
 );

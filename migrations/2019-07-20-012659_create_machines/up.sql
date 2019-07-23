@@ -5,6 +5,7 @@ CREATE DOMAIN wireguard_key  AS varchar(44)  CHECK (length(VALUE) = 44);
  -- Match default /etc/adduser.conf NAME_REGEX
 CREATE DOMAIN username       AS varchar(32)  CHECK (VALUE ~ '\A[a-z][-a-z0-9_]{1,31}\Z');
 CREATE DOMAIN email          AS varchar(254) CHECK (VALUE ~ '\A.+@.+\Z');
+CREATE DOMAIN owner          AS varchar(32);
 
 -- a tree of networks; sub-network is assumed to be able to reach parent networks
 CREATE TABLE networks (
@@ -14,14 +15,14 @@ CREATE TABLE networks (
 
 -- hosting accounts
 CREATE TABLE providers (
+    id     serial      NOT NULL PRIMARY KEY,
     name   varchar(32) NOT NULL,
-    email  email       NOT NULL,
-    PRIMARY KEY (name, email)
+    email  email       NOT NULL
 );
 
 -- who owns the machine?
 CREATE TABLE owners (
-    owner  varchar(32) NOT NULL PRIMARY KEY
+    owner  owner NOT NULL PRIMARY KEY
 );
 
 CREATE TABLE machines (
@@ -37,6 +38,8 @@ CREATE TABLE machines (
 	ssh_port          port                     NOT NULL DEFAULT 904,
 	ssh_user          username                 NOT NULL DEFAULT 'root',
 	added_time        timestamp with time zone NOT NULL DEFAULT now(),
+	owner             owner                    NOT NULL REFERENCES owners(owner),
+	provider_id       integer                  REFERENCES providers(id),
 
 	UNIQUE (wireguard_ip),
 	UNIQUE (wireguard_pubkey)

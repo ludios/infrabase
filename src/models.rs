@@ -13,6 +13,8 @@ pub struct Machine {
     pub ssh_port: i32,
     pub ssh_user: String,
     pub added_time: DateTime<Utc>,
+    pub owner: String,
+    pub provider_id: Option<i32>,
 }
 
 #[derive(Identifiable, Queryable, Associations, Debug)]
