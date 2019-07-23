@@ -14,3 +14,4 @@ chrono = "0.4.7"
 structopt = "0.2.18"
 log = "0.4.7"
 env_logger = "0.6.2"
+indoc = { version = "0.3.3", features = ["unstable"] }

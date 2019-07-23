@@ -1,3 +1,5 @@
+#![feature(proc_macro_hygiene)]
+
 pub mod schema;
 pub mod models;
 
@@ -11,6 +13,7 @@ use diesel::pg::PgConnection;
 use dotenv::dotenv;
 use std::env;
 use structopt::StructOpt;
+use indoc::indoc;
 
 use models::{Machine, MachineAddress};
 use schema::machines::dsl::*;
@@ -54,7 +57,16 @@ fn print_ssh_config() {
     // Use that network to determine IP to use for each machine
 
     for (machine, addresses) in data {
-        println!("Host {} {:?}", machine.hostname, addresses);
+        println!("# {}'s", machine.owner);
+        let address = match *addresses {
+            [MachineAddress { address, .. }] => format!("{}", address.ip()),
+            _ => "".into(),
+        };
+        println!(indoc!("
+            Host {}
+              HostName {}
+              Port {}
+        "), machine.hostname, address, machine.ssh_port);
     }
 }
 
