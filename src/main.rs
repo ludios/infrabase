@@ -15,6 +15,7 @@ use std::env;
 use structopt::StructOpt;
 use indoc::indoc;
 
+use schema::machines;
 use models::{Machine, MachineAddress};
 
 fn import_env() {
@@ -31,11 +32,9 @@ fn establish_connection() -> PgConnection {
 }
 
 fn print_ssh_config() {
-    use schema::machines::dsl::*;
-
     let connection = establish_connection();
 
-    let machines_ = machines
+    let machines_ = machines::table
         .load::<Machine>(&connection)
         .expect("Error loading machines");
 
