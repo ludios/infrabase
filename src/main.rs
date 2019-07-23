@@ -16,32 +16,23 @@ use structopt::StructOpt;
 use indoc::indoc;
 
 use models::{Machine, MachineAddress};
-use schema::machines::dsl::*;
 
-fn establish_connection() -> PgConnection {
+fn import_env() {
     let dirs = xdg::BaseDirectories::with_prefix("infrabase").unwrap();
     let path = dirs.find_config_file("env").expect("Could not find ~/.config/infrabase/env");
     dotenv::from_path(&path).ok();
+}
 
+fn establish_connection() -> PgConnection {
     let database_url = env::var("DATABASE_URL")
         .expect("DATABASE_URL must be set");
     PgConnection::establish(&database_url)
         .expect(&format!("Error connecting to {}", database_url))
 }
 
-fn print_machines() {
-    let connection = establish_connection();
-
-    let results = machines
-        .load::<Machine>(&connection)
-        .expect("Error loading machines");
-
-    for machine in results {
-        println!("{:?}", machine);
-    }
-}
-
 fn print_ssh_config() {
+    use schema::machines::dsl::*;
+
     let connection = establish_connection();
 
     let machines_ = machines
@@ -82,6 +73,7 @@ enum Opt {
 }
 
 fn main() {
+    import_env();
     env_logger::init();
 
     let matches = Opt::from_args();
