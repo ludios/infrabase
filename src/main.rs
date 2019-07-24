@@ -72,7 +72,7 @@ enum Opt {
     /// Prints an ~/.ssh/config that lists all machines
     SshConfig {
         /// Machine to generate SSH config for
-        #[structopt(short = "f", long = "for", name = "MACHINE")]
+        #[structopt(long = "for", name = "MACHINE")]
         r#for: String,
     },
 }
