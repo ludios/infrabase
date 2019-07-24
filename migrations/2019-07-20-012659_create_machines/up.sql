@@ -28,14 +28,7 @@ CREATE TABLE owners (
 CREATE TABLE machines (
 	hostname          hostname                 NOT NULL PRIMARY KEY,
 	wireguard_ip      inet,
-	-- Use a different WireGuard port for each machine behind the same NAT.
-	--
-	-- wireguard_port is per-machine instead of per-address because of how WireGuard and UDP work:
-	-- WireGuard remembers just one endpoint per machine and will assume e.g. (internet IP, 904) is reachable
-	-- even if the port forward was 905 -> 904
-	wireguard_port    port                     CHECK ((wireguard_ip IS NOT NULL AND wireguard_port   IS NOT NULL) OR (wireguard_ip IS NULL AND wireguard_port   IS NULL)),
 	wireguard_pubkey  wireguard_key            CHECK ((wireguard_ip IS NOT NULL AND wireguard_pubkey IS NOT NULL) OR (wireguard_ip IS NULL AND wireguard_pubkey IS NULL)),
-	ssh_port          port                     NOT NULL DEFAULT 904,
 	ssh_user          username                 NOT NULL DEFAULT 'root',
 	added_time        timestamp with time zone NOT NULL DEFAULT now(),
 	owner             owner                    NOT NULL REFERENCES owners(owner),
@@ -45,10 +38,19 @@ CREATE TABLE machines (
 	UNIQUE (wireguard_pubkey)
 );
 
+-- Note: you should use a different WireGuard port for each machine behind the same NAT.
+--
+-- WireGuard remembers just one endpoint per machine and if it gets a packet from IP:904
+-- it will assume (IP, 904) is reachable even if the port forward on the router is 905 -> 904
+-- and the endpoint was originally configured to use :905
+
 CREATE TABLE machine_addresses (
-	hostname  hostname NOT NULL REFERENCES machines,
-	network   netname  NOT NULL REFERENCES networks(name),
-	address   inet     NOT NULL,
-	PRIMARY KEY (hostname, network, address)
-	-- (network, address) isn't necessarily unique; several machines may share the same address but have different ports
+	hostname       hostname NOT NULL REFERENCES machines,
+	network        netname  NOT NULL REFERENCES networks(name),
+	address        inet     NOT NULL,
+    ssh_port       port,
+    wireguard_port port,
+	PRIMARY KEY (hostname, network, address),
+	UNIQUE (address, ssh_port),
+    UNIQUE (address, wireguard_port)
 );

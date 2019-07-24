@@ -3,6 +3,8 @@ table! {
         hostname -> Varchar,
         network -> Varchar,
         address -> Inet,
+        ssh_port -> Nullable<Int4>,
+        wireguard_port -> Nullable<Int4>,
     }
 }
 
@@ -10,9 +12,7 @@ table! {
     machines (hostname) {
         hostname -> Varchar,
         wireguard_ip -> Nullable<Inet>,
-        wireguard_port -> Nullable<Int4>,
         wireguard_pubkey -> Nullable<Varchar>,
-        ssh_port -> Int4,
         ssh_user -> Varchar,
         added_time -> Timestamptz,
         owner -> Varchar,
