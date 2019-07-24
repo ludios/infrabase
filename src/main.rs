@@ -31,7 +31,7 @@ fn establish_connection() -> PgConnection {
         .expect(&format!("Error connecting to {}", database_url))
 }
 
-fn print_ssh_config() {
+fn print_ssh_config(r#for: &str) {
     let connection = establish_connection();
 
     let machines_ = machines::table
@@ -47,6 +47,8 @@ fn print_ssh_config() {
 
     // TODO: get the network of current machine
     // Use that network to determine IP to use for each machine
+
+    dbg!(r#for);
 
     for (machine, addresses) in data {
         println!("# {}'s", machine.owner);
@@ -68,7 +70,11 @@ fn print_ssh_config() {
 enum Opt {
     #[structopt(name = "ssh_config")]
     /// Prints an ~/.ssh/config that lists all machines
-    SshConfig,
+    SshConfig {
+        /// Machine to generate SSH config for
+        #[structopt(short = "f", long = "for", name = "MACHINE")]
+        r#for: String,
+    },
 }
 
 fn main() {
@@ -77,8 +83,8 @@ fn main() {
 
     let matches = Opt::from_args();
     match matches {
-        Opt::SshConfig => {
-            print_ssh_config();
+        Opt::SshConfig { r#for } => {
+            print_ssh_config(&r#for);
         }
     }
 }
