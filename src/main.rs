@@ -49,16 +49,18 @@ fn print_ssh_config(for_machine: &str) {
     println!("# infrabase-generated SSH config for {}\n", for_machine);
 
     for (machine, addresses) in data {
-        println!("# {}'s", machine.owner);
-        let address = match *addresses {
-            [MachineAddress { address, .. }] => format!("{}", address.ip()),
-            _ => "".into(),
+        let (address, ssh_port) = match *addresses {
+            [MachineAddress { address, ssh_port, .. }] => (format!("{}", address.ip()), ssh_port),
+            _ => ("".into(), None),
         };
-        println!(indoc!("
-            Host {}
-              HostName {}
-              Port {}
-        "), machine.hostname, address, machine.ssh_port);
+        if let Some(port) = ssh_port {
+            println!(indoc!("
+                # {}'s
+                Host {}
+                  HostName {}
+                  Port {}
+            "), machine.owner, machine.hostname, address, port);
+        }
     }
 }
 
