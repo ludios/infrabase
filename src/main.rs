@@ -29,7 +29,7 @@ fn establish_connection() -> PgConnection {
         .expect(&format!("Error connecting to {}", database_url))
 }
 
-fn print_ssh_config(r#for: &str) {
+fn print_ssh_config(for_machine: &str) {
     let connection = establish_connection();
 
     let machines_ = machines::table
@@ -46,7 +46,7 @@ fn print_ssh_config(r#for: &str) {
     // TODO: get the network of current machine
     // Use that network to determine IP to use for each machine
 
-    dbg!(r#for);
+    println!("# infrabase-generated SSH config for {}\n", for_machine);
 
     for (machine, addresses) in data {
         println!("# {}'s", machine.owner);
