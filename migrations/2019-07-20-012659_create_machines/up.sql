@@ -9,8 +9,8 @@ CREATE DOMAIN owner          AS varchar(32);
 
 -- a tree of networks; sub-network is assumed to be able to reach parent networks
 CREATE TABLE networks (
-	name    netname NOT NULL PRIMARY KEY,
-	parent  netname REFERENCES networks(name) CHECK (parent != name)
+    name    netname NOT NULL PRIMARY KEY,
+    parent  netname REFERENCES networks(name) CHECK (parent != name)
 );
 
 -- hosting accounts
@@ -26,16 +26,16 @@ CREATE TABLE owners (
 );
 
 CREATE TABLE machines (
-	hostname          hostname                 NOT NULL PRIMARY KEY,
-	wireguard_ip      inet,
-	wireguard_pubkey  wireguard_key            CHECK ((wireguard_ip IS NOT NULL AND wireguard_pubkey IS NOT NULL) OR (wireguard_ip IS NULL AND wireguard_pubkey IS NULL)),
-	ssh_user          username                 NOT NULL DEFAULT 'root',
-	added_time        timestamp with time zone NOT NULL DEFAULT now(),
-	owner             owner                    NOT NULL REFERENCES owners(owner),
-	provider_id       integer                  REFERENCES providers(id),
+    hostname          hostname                 NOT NULL PRIMARY KEY,
+    wireguard_ip      inet,
+    wireguard_pubkey  wireguard_key            CHECK ((wireguard_ip IS NOT NULL AND wireguard_pubkey IS NOT NULL) OR (wireguard_ip IS NULL AND wireguard_pubkey IS NULL)),
+    ssh_user          username                 NOT NULL DEFAULT 'root',
+    added_time        timestamp with time zone NOT NULL DEFAULT now(),
+    owner             owner                    NOT NULL REFERENCES owners(owner),
+    provider_id       integer                  REFERENCES providers(id),
 
-	UNIQUE (wireguard_ip),
-	UNIQUE (wireguard_pubkey)
+    UNIQUE (wireguard_ip),
+    UNIQUE (wireguard_pubkey)
 );
 
 -- Note: you should use a different WireGuard port for each machine behind the same NAT.
@@ -45,12 +45,12 @@ CREATE TABLE machines (
 -- and the endpoint was originally configured to use :905
 
 CREATE TABLE machine_addresses (
-	hostname       hostname NOT NULL REFERENCES machines,
-	network        netname  NOT NULL REFERENCES networks(name),
-	address        inet     NOT NULL,
+    hostname       hostname NOT NULL REFERENCES machines,
+    network        netname  NOT NULL REFERENCES networks(name),
+    address        inet     NOT NULL,
     ssh_port       port,
     wireguard_port port,
-	PRIMARY KEY (hostname, network, address),
-	UNIQUE (address, ssh_port),
+    PRIMARY KEY (hostname, network, address),
+    UNIQUE (address, ssh_port),
     UNIQUE (address, wireguard_port)
 );
