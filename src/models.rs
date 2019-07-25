@@ -32,5 +32,13 @@ pub struct MachineAddress {
 #[table_name = "networks"]
 pub struct Network {
     pub name: String,
-    pub parent: String,
+}
+
+#[derive(Identifiable, Queryable, Debug)]
+#[primary_key(name, other_network, priority)]
+#[table_name = "networks"]
+pub struct NetworkLink {
+    pub name: String,
+    pub other_network: String,
+    pub priority: i32,
 }

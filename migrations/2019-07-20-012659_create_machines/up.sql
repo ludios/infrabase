@@ -7,10 +7,26 @@ CREATE DOMAIN username       AS varchar(32)  CHECK (VALUE ~ '\A[a-z][-a-z0-9_]{1
 CREATE DOMAIN email          AS varchar(254) CHECK (VALUE ~ '\A.+@.+\Z');
 CREATE DOMAIN owner          AS varchar(32);
 
--- a tree of networks; sub-network is assumed to be able to reach parent networks
 CREATE TABLE networks (
-    name    netname NOT NULL PRIMARY KEY,
-    parent  netname REFERENCES networks(name) CHECK (parent != name)
+    name  netname NOT NULL PRIMARY KEY
+);
+
+-- If network `name` can reach all addresses on `other_network`, it must be listed here
+-- Network must also have a self-link if machines on the network can reach other addresses on the network
+--
+-- priority decides which endpoint should be used when there are multiple candidates
+--
+-- (internet,  internet,   0)
+-- (homelan,   homelan,   -1) <- if machine on homelan reaching another machine on homelan, prefer this over (internet, internet) or (homelan, internet)
+-- (homelan,   internet,   0)
+-- (work,      work,      -1)
+-- (work,      internet,   0)
+--
+CREATE TABLE network_links (
+    name           netname NOT NULL REFERENCES networks(name),
+    other_network  netname NOT NULL REFERENCES networks(name),
+    priority       integer NOT NULL,
+    PRIMARY KEY (name, other_network)
 );
 
 -- hosting accounts

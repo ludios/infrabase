@@ -21,9 +21,16 @@ table! {
 }
 
 table! {
+    network_links (name, other_network) {
+        name -> Varchar,
+        other_network -> Varchar,
+        priority -> Int4,
+    }
+}
+
+table! {
     networks (name) {
         name -> Varchar,
-        parent -> Nullable<Varchar>,
     }
 }
 
@@ -49,6 +56,7 @@ joinable!(machines -> providers (provider_id));
 allow_tables_to_appear_in_same_query!(
     machine_addresses,
     machines,
+    network_links,
     networks,
     owners,
     providers,
