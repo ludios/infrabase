@@ -32,16 +32,16 @@ fn establish_connection() -> PgConnection {
 fn print_ssh_config(for_machine: &str) {
     let connection = establish_connection();
 
-    let machines_ = machines::table
+    let machines = machines::table
         .load::<Machine>(&connection)
         .expect("Error loading machines");
 
-    let addresses_ = MachineAddress::belonging_to(&machines_)
+    let addresses = MachineAddress::belonging_to(&machines)
         .load::<MachineAddress>(&connection)
         .expect("Error loading addresses")
-        .grouped_by(&machines_);
+        .grouped_by(&machines);
 
-    let data = machines_.into_iter().zip(addresses_).collect::<Vec<_>>();
+    let data = machines.into_iter().zip(addresses).collect::<Vec<_>>();
 
     // TODO: get the network of current machine
     // Use that network to determine IP to use for each machine
