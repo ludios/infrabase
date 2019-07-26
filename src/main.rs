@@ -9,7 +9,7 @@ extern crate diesel;
 use diesel::prelude::*;
 use diesel::pg::PgConnection;
 use dotenv;
-use std::env;
+use std::{env, process};
 use structopt::StructOpt;
 use indoc::indoc;
 
@@ -17,9 +17,14 @@ use schema::machines;
 use models::{Machine, MachineAddress};
 
 fn import_env() {
-    let dirs = xdg::BaseDirectories::with_prefix("infrabase").unwrap();
-    let path = dirs.find_config_file("env").expect("Could not find ~/.config/infrabase/env");
-    dotenv::from_path(&path).ok();
+    let env_path = dirs::config_dir().unwrap().join("infrabase").join("env");
+    match dotenv::from_path(&env_path) {
+        Ok(_) => {},
+        Err(err) => {
+            eprintln!("Could not read config file {}:\n{:?}", env_path.to_str().unwrap(), err);
+            process::exit(1);
+        }
+    }
 }
 
 fn establish_connection() -> PgConnection {

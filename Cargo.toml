@@ -9,7 +9,7 @@ edition = "2018"
 [dependencies]
 diesel = { version = "1.0.0", features = ["postgres", "chrono", "network-address"] }
 ipnetwork = "0.13.0"
-xdg = "2.2.0"
+dirs = "2.0"
 dotenv = "0.9.0"
 chrono = "0.4.7"
 structopt = "0.2.18"
