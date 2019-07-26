@@ -9,22 +9,25 @@ extern crate diesel;
 use diesel::prelude::*;
 use diesel::pg::PgConnection;
 use dotenv;
-use std::{env, process};
+use std::{env, path::PathBuf};
+use snafu::{ResultExt, Snafu};
 use structopt::StructOpt;
 use indoc::indoc;
 
 use schema::machines;
 use models::{Machine, MachineAddress};
 
-fn import_env() {
-    let env_path = dirs::config_dir().unwrap().join("infrabase").join("env");
-    match dotenv::from_path(&env_path) {
-        Ok(_) => {},
-        Err(err) => {
-            eprintln!("Could not read config file {}:\n{:?}", env_path.to_str().unwrap(), err);
-            process::exit(1);
-        }
-    }
+#[derive(Debug, Snafu)]
+enum Error {
+    #[snafu(display("Unable to read configuration from {}: {}", path.display(), source))]
+    ReadConfiguration { source: dotenv::DotenvError, path: PathBuf },
+}
+
+type Result<T, E = Error> = std::result::Result<T, E>;
+
+fn import_env() -> Result<()> {
+    let path = dirs::config_dir().unwrap().join("infrabase").join("env");
+    dotenv::from_path(&path).context(ReadConfiguration { path })
 }
 
 fn establish_connection() -> PgConnection {
@@ -82,8 +85,8 @@ enum Opt {
     },
 }
 
-fn main() {
-    import_env();
+fn run() -> Result<()> {
+    import_env()?;
     env_logger::init();
 
     let matches = Opt::from_args();
@@ -91,5 +94,13 @@ fn main() {
         Opt::SshConfig { r#for } => {
             print_ssh_config(&r#for);
         }
+    }
+    Ok(())
+}
+
+fn main() {
+    match run() {
+        Ok(())   => {},
+        Err(err) => eprintln!("An error occurred:\n{}", err),
     }
 }
