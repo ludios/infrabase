@@ -16,6 +16,7 @@ use diesel::pg::PgConnection;
 use dotenv;
 use snafu::{ResultExt, Snafu};
 use structopt::StructOpt;
+use ifmt::iprintln;
 use indoc::indoc;
 
 use schema::{machines, network_links};
@@ -101,12 +102,12 @@ fn print_ssh_config(for_machine: &str) -> Result<()> {
 
         match (address, ssh_port) {
             (Some(address), Some(port)) => {
-                println!(indoc!("
-                    # owner: {}
-                    Host {}
-                      HostName {}
-                      Port {}
-                "), machine.owner, machine.hostname, address, port);
+                iprintln!("\
+# owner: {machine.owner}
+Host {machine.hostname}
+  HostName {address}
+  Port {port}
+                ");
             },
             _ => {}
         }
