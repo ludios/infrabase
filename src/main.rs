@@ -90,7 +90,7 @@ fn print_ssh_config(for_machine: &str) -> Result<()> {
         let (address, ssh_port) = match network_to_network.get(0) {
             None => {
                 // We prefer to SSH over the non-WireGuard IP in case WireGuard is down,
-                // but if there is no reachable address, use the WireGuard IP instead
+                // but if there is no reachable address, use the WireGuard IP instead.
                 (machine.wireguard_ip.map(|o| o.ip()), machine.ssh_port)
             },
             Some((_, dest_network)) => {
