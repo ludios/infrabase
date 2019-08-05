@@ -45,14 +45,14 @@ fn establish_connection() -> PgConnection {
 }
 
 /// A map of (network, other_network) -> priority
-type NetworkLinksMap<'a> = HashMap<(&'a str, &'a str), i32>;
+type NetworkLinksMap = HashMap<(String, String), i32>;
 
 fn get_networks_links_map(connection: &PgConnection) -> NetworkLinksMap {
     network_links::table
         .load::<NetworkLink>(connection)
         .expect("Error loading network_links")
         .into_iter()
-        .map(|row| ((&*row.name, &*row.other_network), row.priority))
+        .map(|row| ((row.name, row.other_network), row.priority))
         .collect::<HashMap<_, _>>()
 }
 
@@ -73,7 +73,7 @@ fn print_ssh_config(for_machine: &str) -> Result<()> {
     let source_networks = match source_machine {
         None => return Err(Error::MissingSourceMachine { source_machine: for_machine.into() }),
         Some((_, addresses)) => {
-            addresses.iter().map(|a| &*a.network).collect::<Vec<_>>()
+            addresses.iter().map(|a| a.network.clone()).collect::<Vec<_>>()
         }
     };
 
@@ -82,21 +82,38 @@ fn print_ssh_config(for_machine: &str) -> Result<()> {
     let networks_links_map = get_networks_links_map(&connection);
 
     for (machine, addresses) in &data {
-        let dest_networks = addresses.iter().map(|a| &*a.network).collect::<Vec<_>>();
-        let mut network_to_network = iproduct!(&source_networks, &dest_networks).collect::<Vec<_>>();
-        network_to_network.sort_by_key(|(s, d)| networks_links_map.get(&(*s, *d)).unwrap());
-        let desired_pair = network_to_network[0];
+        let dest_networks = addresses.iter().map(|a| a.network.clone()).collect::<Vec<_>>();
 
+        // TODO: don't construct String to do lookup
+        // https://users.rust-lang.org/t/the-borrow-trait-and-structs-as-hashmap-keys/18634
+        // http://idubrov.name/rust/2018/06/01/tricking-the-hashmap.html
 
-        let address = "0";
-        let ssh_port = Some("0");
-        if let Some(port) = ssh_port {
-            println!(indoc!("
-                # {}'s
-                Host {}
-                  HostName {}
-                  Port {}
-            "), machine.owner, machine.hostname, address, port);
+        let mut network_to_network = iproduct!(&source_networks, &dest_networks)
+            .filter(|(s, d)| networks_links_map.contains_key(&(s.to_string(), d.to_string())))
+            .collect::<Vec<_>>();
+        network_to_network.sort_by_key(|(s, d)| networks_links_map.get(&(s.to_string(), d.to_string())).unwrap());
+        let (address, ssh_port) = match network_to_network.get(0) {
+            None => {
+                // If not reachable, use the wireguard IP instead
+                // TODO XXX get ssh port from machine.ssh_port
+                (machine.wireguard_ip.map(|o| o.ip()), Some(904))
+            },
+            Some((_, dest_network)) => {
+                let desired_address = addresses.iter().find(|a| a.network == **dest_network).unwrap();
+                (Some(desired_address.address.ip()), desired_address.ssh_port)
+            }
+        };
+
+        match (address, ssh_port) {
+            (Some(address), Some(port)) => {
+                println!(indoc!("
+                    # owner: {}
+                    Host {}
+                      HostName {}
+                      Port {}
+                "), machine.owner, machine.hostname, address, port);
+            },
+            _ => {}
         }
     }
     Ok(())
