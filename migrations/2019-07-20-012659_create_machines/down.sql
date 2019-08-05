@@ -1,5 +1,6 @@
 DROP TABLE machine_addresses;
 DROP TABLE machines;
+DROP TABLE network_links;
 DROP TABLE networks;
 DROP TABLE providers;
 DROP TABLE owners;
