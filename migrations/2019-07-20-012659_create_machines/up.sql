@@ -45,7 +45,9 @@ CREATE TABLE machines (
     hostname          hostname                 NOT NULL PRIMARY KEY,
     wireguard_ip      inet,
     wireguard_pubkey  wireguard_key            CHECK ((wireguard_ip IS NOT NULL AND wireguard_pubkey IS NOT NULL) OR (wireguard_ip IS NULL AND wireguard_pubkey IS NULL)),
-    ssh_user          username                 NOT NULL DEFAULT 'root',
+    -- SSH port on localhost and wireguard interfaces
+    ssh_port          port,
+    ssh_user          username                 DEFAULT 'root' CHECK ((ssh_port IS NOT NULL AND ssh_user IS NOT NULL) OR (ssh_port IS NULL AND ssh_user IS NULL)),
     added_time        timestamp with time zone NOT NULL DEFAULT now(),
     owner             owner                    NOT NULL REFERENCES owners(owner),
     provider_id       integer                  REFERENCES providers(id),
