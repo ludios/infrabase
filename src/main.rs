@@ -83,11 +83,6 @@ fn print_ssh_config(for_machine: &str) -> Result<()> {
 
     for (machine, addresses) in &data {
         let dest_networks = addresses.iter().map(|a| a.network.clone()).collect::<Vec<_>>();
-
-        // TODO: don't construct String to do lookup
-        // https://users.rust-lang.org/t/the-borrow-trait-and-structs-as-hashmap-keys/18634
-        // http://idubrov.name/rust/2018/06/01/tricking-the-hashmap.html
-
         let mut network_to_network = iproduct!(&source_networks, &dest_networks)
             .filter(|(s, d)| networks_links_map.contains_key(&(s.to_string(), d.to_string())))
             .collect::<Vec<_>>();
