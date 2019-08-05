@@ -6,6 +6,9 @@ pub mod models;
 #[macro_use]
 extern crate diesel;
 
+#[macro_use]
+extern crate itertools;
+
 use std::collections::HashMap;
 use std::{env, path::PathBuf};
 use diesel::prelude::*;
@@ -42,14 +45,14 @@ fn establish_connection() -> PgConnection {
 }
 
 /// A map of (network, other_network) -> priority
-type NetworkLinksMap = HashMap<(String, String), i32>;
+type NetworkLinksMap<'a> = HashMap<(&'a str, &'a str), i32>;
 
-fn networks_links_map(connection: &PgConnection) -> NetworkLinksMap {
+fn get_networks_links_map(connection: &PgConnection) -> NetworkLinksMap {
     network_links::table
         .load::<NetworkLink>(connection)
         .expect("Error loading network_links")
         .into_iter()
-        .map(|row| ((row.name, row.other_network), row.priority))
+        .map(|row| ((&*row.name, &*row.other_network), row.priority))
         .collect::<HashMap<_, _>>()
 }
 
@@ -70,17 +73,23 @@ fn print_ssh_config(for_machine: &str) -> Result<()> {
     let source_networks = match source_machine {
         None => return Err(Error::MissingSourceMachine { source_machine: for_machine.into() }),
         Some((_, addresses)) => {
-            addresses.iter().map(|a| &a.network).collect::<Vec<_>>()
+            addresses.iter().map(|a| &*a.network).collect::<Vec<_>>()
         }
     };
 
     println!("# infrabase-generated SSH config for {}\n", for_machine);
 
-    for (machine, addresses) in data {
-        let (address, ssh_port) = match *addresses {
-            [MachineAddress { address, ssh_port, .. }] => (format!("{}", address.ip()), ssh_port),
-            _ => ("".into(), None),
-        };
+    let networks_links_map = get_networks_links_map(&connection);
+
+    for (machine, addresses) in &data {
+        let dest_networks = addresses.iter().map(|a| &*a.network).collect::<Vec<_>>();
+        let mut network_to_network = iproduct!(&source_networks, &dest_networks).collect::<Vec<_>>();
+        network_to_network.sort_by_key(|(s, d)| networks_links_map.get(&(*s, *d)).unwrap());
+        let desired_pair = network_to_network[0];
+
+
+        let address = "0";
+        let ssh_port = Some("0");
         if let Some(port) = ssh_port {
             println!(indoc!("
                 # {}'s
