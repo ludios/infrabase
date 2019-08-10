@@ -56,19 +56,24 @@ fn get_networks_links_map(connection: &PgConnection) -> NetworkLinksMap {
         .collect::<HashMap<_, _>>()
 }
 
-fn print_ssh_config(for_machine: &str) -> Result<()> {
-    let connection = establish_connection();
+fn get_machines_and_addresses(connection: &PgConnection) -> Result<Vec<(Machine, Vec<MachineAddress>)>> {
+    // TODO: run in transaction
 
     let machines = machines::table
-        .load::<Machine>(&connection)
+        .load::<Machine>(connection)
         .expect("Error loading machines");
 
     let addresses = MachineAddress::belonging_to(&machines)
-        .load::<MachineAddress>(&connection)
+        .load::<MachineAddress>(connection)
         .expect("Error loading addresses")
         .grouped_by(&machines);
 
-    let data = machines.into_iter().zip(addresses).collect::<Vec<_>>();
+    Ok(machines.into_iter().zip(addresses).collect::<Vec<_>>())
+}
+
+fn print_ssh_config(for_machine: &str) -> Result<()> {
+    let connection: PgConnection = establish_connection();
+    let data = get_machines_and_addresses(&connection)?;
     let source_machine = data.iter().find(|(machine, _)| machine.hostname == for_machine);
     let source_networks = match source_machine {
         None => return Err(Error::MissingSourceMachine { source_machine: for_machine.into() }),
@@ -114,6 +119,17 @@ fn print_ssh_config(for_machine: &str) -> Result<()> {
     Ok(())
 }
 
+fn list_machines() -> Result<()> {
+    let connection = establish_connection();
+    let data = get_machines_and_addresses(&connection)?;
+
+    for (machine, _addresses) in &data {
+        println!("{}", machine.hostname);
+    }
+
+    Ok(())
+}
+
 #[derive(StructOpt, Debug)]
 #[structopt(name = "infrabase")]
 /// the machine inventory system
@@ -125,6 +141,9 @@ enum Opt {
         #[structopt(long = "for", name = "MACHINE")]
         r#for: String,
     },
+    #[structopt(name = "ls")]
+    /// List machines
+    List,
 }
 
 fn run() -> Result<()> {
@@ -135,6 +154,9 @@ fn run() -> Result<()> {
     match matches {
         Opt::SshConfig { r#for } => {
             print_ssh_config(&r#for)?;
+        },
+        Opt::List => {
+            list_machines()?;
         }
     }
     Ok(())
