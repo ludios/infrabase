@@ -28,6 +28,9 @@ enum Error {
 
     #[snafu(display("Could not find source machine {:?} in database", source_machine))]
     MissingSourceMachine { source_machine: String },
+
+    #[snafu(source(from(diesel::result::Error, Box::new)))]
+    DieselError { source: Box<diesel::result::Error> },g
 }
 
 type Result<T, E = Error> = std::result::Result<T, E>;
@@ -57,18 +60,16 @@ fn get_networks_links_map(connection: &PgConnection) -> NetworkLinksMap {
 }
 
 fn get_machines_and_addresses(connection: &PgConnection) -> Result<Vec<(Machine, Vec<MachineAddress>)>> {
-    // TODO: run in transaction
+    Ok(connection.transaction::<_, _, _>(|| {
+        let machines = machines::table
+            .load::<Machine>(connection)?;
 
-    let machines = machines::table
-        .load::<Machine>(connection)
-        .expect("Error loading machines");
+        let addresses = MachineAddress::belonging_to(&machines)
+            .load::<MachineAddress>(connection)?
+            .grouped_by(&machines);
 
-    let addresses = MachineAddress::belonging_to(&machines)
-        .load::<MachineAddress>(connection)
-        .expect("Error loading addresses")
-        .grouped_by(&machines);
-
-    Ok(machines.into_iter().zip(addresses).collect::<Vec<_>>())
+        Ok(machines.into_iter().zip(addresses).collect::<Vec<_>>())
+    }).context(DieselError)?)
 }
 
 fn print_ssh_config(for_machine: &str) -> Result<()> {
