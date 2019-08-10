@@ -82,11 +82,11 @@ fn get_machines_and_addresses(connection: &PgConnection) -> DieselResult<Vec<(Ma
 
 fn print_ssh_config(for_machine: &str) -> Result<()> {
     let connection = establish_connection();
-    let (data, network_links_map) = connection.transaction::<_, _, _>(|| {
+    let (data, network_links_map) = connection.transaction::<_, Error, _>(|| {
         let data = get_machines_and_addresses(&connection)?;
         let network_links_map = get_network_links_map(&connection);
         Ok((data, network_links_map))
-    }).context(DieselError)?;
+    })?;
     let source_machine = data.iter().find(|(machine, _)| machine.hostname == for_machine);
     let source_networks = match source_machine {
         None => return Err(Error::MissingSourceMachine { source_machine: for_machine.into() }),
