@@ -30,7 +30,13 @@ enum Error {
     MissingSourceMachine { source_machine: String },
 
     #[snafu(source(from(diesel::result::Error, Box::new)))]
-    DieselError { source: Box<diesel::result::Error> },g
+    DieselError { source: diesel::result::Error },
+}
+
+impl From<diesel::result::Error> for Error {
+    fn from(source: diesel::result::Error) -> Self {
+        Error::DieselError { source: source }
+    }
 }
 
 type Result<T, E = Error> = std::result::Result<T, E>;
@@ -50,7 +56,7 @@ fn establish_connection() -> PgConnection {
 /// A map of (network, other_network) -> priority
 type NetworkLinksMap = HashMap<(String, String), i32>;
 
-fn get_networks_links_map(connection: &PgConnection) -> NetworkLinksMap {
+fn get_network_links_map(connection: &PgConnection) -> NetworkLinksMap {
     network_links::table
         .load::<NetworkLink>(connection)
         .expect("Error loading network_links")
@@ -74,7 +80,11 @@ fn get_machines_and_addresses(connection: &PgConnection) -> Result<Vec<(Machine,
 
 fn print_ssh_config(for_machine: &str) -> Result<()> {
     let connection: PgConnection = establish_connection();
-    let data = get_machines_and_addresses(&connection)?;
+    let (data, network_links_map) = connection.transaction::<_, Error, _>(|| {
+        let data = get_machines_and_addresses(&connection)?;
+        let network_links_map = get_network_links_map(&connection);
+        Ok((data, network_links_map))
+    })?;
     let source_machine = data.iter().find(|(machine, _)| machine.hostname == for_machine);
     let source_networks = match source_machine {
         None => return Err(Error::MissingSourceMachine { source_machine: for_machine.into() }),
@@ -85,14 +95,12 @@ fn print_ssh_config(for_machine: &str) -> Result<()> {
 
     println!("# infrabase-generated SSH config for {}\n", for_machine);
 
-    let networks_links_map = get_networks_links_map(&connection);
-
     for (machine, addresses) in &data {
         let dest_networks = addresses.iter().map(|a| a.network.clone()).collect::<Vec<_>>();
         let mut network_to_network = iproduct!(&source_networks, &dest_networks)
-            .filter(|(s, d)| networks_links_map.contains_key(&(s.to_string(), d.to_string())))
+            .filter(|(s, d)| network_links_map.contains_key(&(s.to_string(), d.to_string())))
             .collect::<Vec<_>>();
-        network_to_network.sort_by_key(|(s, d)| networks_links_map.get(&(s.to_string(), d.to_string())).unwrap());
+        network_to_network.sort_by_key(|(s, d)| network_links_map.get(&(s.to_string(), d.to_string())).unwrap());
         let (address, ssh_port) = match network_to_network.get(0) {
             None => {
                 // We prefer to SSH over the non-WireGuard IP in case WireGuard is down,
