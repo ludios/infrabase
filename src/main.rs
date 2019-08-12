@@ -17,6 +17,7 @@ use dotenv;
 use snafu::{ResultExt, Snafu};
 use structopt::StructOpt;
 use indoc::indoc;
+use natural_sort::HumanStr;
 
 use schema::{machines, network_links};
 use models::{Machine, MachineAddress, NetworkLink};
@@ -102,7 +103,7 @@ fn print_ssh_config(for_machine: &str) -> Result<()> {
         let mut network_to_network = iproduct!(&source_networks, &dest_networks)
             .filter(|(s, d)| network_links_map.contains_key(&(s.to_string(), d.to_string())))
             .collect::<Vec<_>>();
-        network_to_network.sort_by_key(|(s, d)| network_links_map.get(&(s.to_string(), d.to_string())).unwrap());
+        network_to_network.sort_unstable_by_key(|(s, d)| network_links_map.get(&(s.to_string(), d.to_string())).unwrap());
         let (address, ssh_port) = match network_to_network.get(0) {
             None => {
                 // We prefer to SSH over the non-WireGuard IP in case WireGuard is down,
@@ -132,7 +133,16 @@ fn print_ssh_config(for_machine: &str) -> Result<()> {
 
 fn list_machines() -> Result<()> {
     let connection = establish_connection();
-    let data = get_machines_and_addresses(&connection)?;
+
+    let mut data = get_machines_and_addresses(&connection)?;
+
+    // natural_sort refuses to compare string segments with integer segments,
+    // so if returns None, fall back to String cmp.
+    data.sort_unstable_by(|(m1, _), (m2, _)| {
+        HumanStr::new(&m1.hostname)
+            .partial_cmp(&HumanStr::new(&m2.hostname))
+            .unwrap_or(m1.hostname.cmp(&m2.hostname))
+    });
 
     for (machine, _addresses) in &data {
         println!("{}", machine.hostname);
