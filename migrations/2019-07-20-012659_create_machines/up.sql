@@ -72,3 +72,9 @@ CREATE TABLE machine_addresses (
     UNIQUE (address, ssh_port),
     UNIQUE (address, wireguard_port)
 );
+
+CREATE TABLE machine_tags (
+    hostname hostname NOT NULL REFERENCES machines,
+    tag      varchar  NOT NULL CHECK (tag ~ '\A[^\x00-\x20]+\Z'),
+    PRIMARY KEY (hostname, tag)
+);
