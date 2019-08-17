@@ -22,6 +22,7 @@ use natural_sort::HumanStr;
 use schema::{machines, network_links};
 use models::{Machine, MachineAddress, NetworkLink};
 
+#[allow(clippy::enum_variant_names)]
 #[derive(Debug, Snafu)]
 enum Error {
     #[snafu(display("Unable to read configuration from {}: {}", path.display(), source))]
@@ -32,6 +33,12 @@ enum Error {
 
     #[snafu(source(from(diesel::result::Error, Box::new)))]
     DieselError { source: diesel::result::Error },
+
+    #[snafu(source(from(diesel::ConnectionError, Box::new)))]
+    DieselConnectionError { source: diesel::ConnectionError },
+
+    #[snafu(source(from(env::VarError, Box::new)))]
+    VarError { source: env::VarError },
 }
 
 impl From<diesel::result::Error> for Error {
@@ -49,11 +56,9 @@ fn import_env() -> Result<()> {
     dotenv::from_path(&path).context(ReadConfiguration { path })
 }
 
-fn establish_connection() -> PgConnection {
-    let database_url = env::var("DATABASE_URL")
-        .expect("DATABASE_URL must be set");
-    PgConnection::establish(&database_url)
-        .expect(&format!("Error connecting to {}", database_url))
+fn establish_connection() -> Result<PgConnection> {
+    let database_url = env::var("DATABASE_URL").context(VarError)?;
+    Ok(PgConnection::establish(&database_url).context(DieselConnectionError)?)
 }
 
 /// A map of (network, other_network) -> priority
@@ -82,7 +87,7 @@ fn get_machines_and_addresses(connection: &PgConnection) -> DieselResult<Vec<(Ma
 }
 
 fn print_ssh_config(for_machine: &str) -> Result<()> {
-    let connection = establish_connection();
+    let connection = establish_connection()?;
     let (data, network_links_map) = connection.transaction::<_, Error, _>(|| {
         let data = get_machines_and_addresses(&connection)?;
         let network_links_map = get_network_links_map(&connection);
@@ -129,7 +134,7 @@ fn print_ssh_config(for_machine: &str) -> Result<()> {
 }
 
 fn list_machines() -> Result<()> {
-    let connection = establish_connection();
+    let connection = establish_connection()?;
 
     let mut data = get_machines_and_addresses(&connection)?;
 
