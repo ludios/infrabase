@@ -61,13 +61,13 @@ fn establish_connection() -> Result<PgConnection> {
 /// A map of (network, other_network) -> priority
 type NetworkLinksMap = HashMap<(String, String), i32>;
 
-fn get_network_links_map(connection: &PgConnection) -> NetworkLinksMap {
-    network_links::table
-        .load::<NetworkLink>(connection)
-        .expect("Error loading network_links")
+fn get_network_links_map(connection: &PgConnection) -> DieselResult<NetworkLinksMap> {
+    let map = network_links::table
+        .load::<NetworkLink>(connection)?
         .into_iter()
         .map(|row| ((row.name, row.other_network), row.priority))
-        .collect::<HashMap<_, _>>()
+        .collect::<HashMap<_, _>>();
+    Ok(map)
 }
 
 fn get_machines_and_addresses(connection: &PgConnection) -> DieselResult<Vec<(Machine, Vec<MachineAddress>)>> {
@@ -87,7 +87,7 @@ fn print_ssh_config(for_machine: &str) -> Result<()> {
     let connection = establish_connection()?;
     let (data, network_links_map) = connection.transaction::<_, Error, _>(|| {
         let data = get_machines_and_addresses(&connection)?;
-        let network_links_map = get_network_links_map(&connection);
+        let network_links_map = get_network_links_map(&connection)?;
         Ok((data, network_links_map))
     })?;
     let source_machine = data.iter().find(|(machine, _)| machine.hostname == for_machine);
