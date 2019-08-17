@@ -143,7 +143,7 @@ fn list_machines() -> Result<()> {
     data.sort_unstable_by(|(m1, _), (m2, _)| {
         HumanStr::new(&m1.hostname)
             .partial_cmp(&HumanStr::new(&m2.hostname))
-            .unwrap_or(m1.hostname.cmp(&m2.hostname))
+            .unwrap_or_else(|| m1.hostname.cmp(&m2.hostname))
     });
 
     for (machine, _addresses) in &data {
