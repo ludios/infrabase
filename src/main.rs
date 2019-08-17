@@ -31,13 +31,10 @@ enum Error {
     #[snafu(display("Could not find source machine {:?} in database", source_machine))]
     MissingSourceMachine { source_machine: String },
 
-    #[snafu(source(from(diesel::result::Error, Box::new)))]
     DieselError { source: diesel::result::Error },
 
-    #[snafu(source(from(diesel::ConnectionError, Box::new)))]
     DieselConnectionError { source: diesel::ConnectionError },
 
-    #[snafu(source(from(env::VarError, Box::new)))]
     VarError { source: env::VarError },
 }
 
