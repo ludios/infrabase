@@ -36,7 +36,7 @@ enum Error {
 
 impl From<diesel::result::Error> for Error {
     fn from(source: diesel::result::Error) -> Self {
-        Error::DieselError { source: source }
+        Error::DieselError { source }
     }
 }
 
@@ -116,16 +116,13 @@ fn print_ssh_config(for_machine: &str) -> Result<()> {
             }
         };
 
-        match (address, ssh_port) {
-            (Some(address), Some(port)) => {
-                println!(indoc!("
-                    # owner: {}
-                    Host {}
-                      HostName {}
-                      Port {}
-                "), machine.owner, machine.hostname, address, port);
-            },
-            _ => {}
+        if let (Some(address), Some(port)) = (address, ssh_port) {
+            println!(indoc!("
+                # owner: {}
+                Host {}
+                  HostName {}
+                  Port {}
+            "), machine.owner, machine.hostname, address, port);
         }
     }
     Ok(())
