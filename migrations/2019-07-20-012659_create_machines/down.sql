@@ -1,4 +1,3 @@
-DROP TABLE machine_tags;
 DROP TABLE machine_addresses;
 DROP TABLE machines;
 DROP TABLE network_links;
