@@ -22,7 +22,6 @@ use natural_sort::HumanStr;
 use schema::{machines, network_links};
 use models::{Machine, MachineAddress, NetworkLink};
 
-#[allow(clippy::enum_variant_names)]
 #[derive(Debug, Snafu)]
 enum Error {
     #[snafu(display("Unable to read configuration from {}: {}", path.display(), source))]
@@ -31,16 +30,16 @@ enum Error {
     #[snafu(display("Could not find source machine {:?} in database", source_machine))]
     MissingSourceMachine { source_machine: String },
 
-    DieselError { source: diesel::result::Error },
+    Diesel { source: diesel::result::Error },
 
-    DieselConnectionError { source: diesel::ConnectionError },
+    DieselConnection { source: diesel::ConnectionError },
 
-    VarError { source: env::VarError },
+    Var { source: env::VarError },
 }
 
 impl From<diesel::result::Error> for Error {
     fn from(source: diesel::result::Error) -> Self {
-        Error::DieselError { source }
+        Error::Diesel { source }
     }
 }
 
@@ -54,8 +53,8 @@ fn import_env() -> Result<()> {
 }
 
 fn establish_connection() -> Result<PgConnection> {
-    let database_url = env::var("DATABASE_URL").context(VarError)?;
-    Ok(PgConnection::establish(&database_url).context(DieselConnectionError)?)
+    let database_url = env::var("DATABASE_URL").context(Var)?;
+    Ok(PgConnection::establish(&database_url).context(DieselConnection)?)
 }
 
 /// A map of (network, other_network) -> priority
