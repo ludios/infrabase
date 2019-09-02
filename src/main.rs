@@ -82,6 +82,34 @@ fn get_machines_and_addresses(connection: &PgConnection) -> DieselResult<Vec<(Ma
     })
 }
 
+fn list_machines() -> Result<()> {
+    let connection = establish_connection()?;
+
+    let mut data = get_machines_and_addresses(&connection)?;
+
+    // natural_sort refuses to compare string segments with integer segments,
+    // so if returns None, fall back to String cmp.
+    data.sort_unstable_by(|(m1, _), (m2, _)| {
+        HumanStr::new(&m1.hostname)
+            .partial_cmp(&HumanStr::new(&m2.hostname))
+            .unwrap_or_else(|| m1.hostname.cmp(&m2.hostname))
+    });
+
+    for (machine, _addresses) in &data {
+        println!("{}", machine.hostname);
+    }
+
+    Ok(())
+}
+
+fn add_machine(hostname: &str) -> Result<()> {
+    let connection = establish_connection()?;
+
+    println!("{}", hostname);
+
+    Ok(())
+}
+
 fn print_ssh_config(for_machine: &str) -> Result<()> {
     let connection = establish_connection()?;
     let (data, network_links_map) = connection.transaction::<_, Error, _>(|| {
@@ -129,30 +157,20 @@ fn print_ssh_config(for_machine: &str) -> Result<()> {
     Ok(())
 }
 
-fn list_machines() -> Result<()> {
-    let connection = establish_connection()?;
-
-    let mut data = get_machines_and_addresses(&connection)?;
-
-    // natural_sort refuses to compare string segments with integer segments,
-    // so if returns None, fall back to String cmp.
-    data.sort_unstable_by(|(m1, _), (m2, _)| {
-        HumanStr::new(&m1.hostname)
-            .partial_cmp(&HumanStr::new(&m2.hostname))
-            .unwrap_or_else(|| m1.hostname.cmp(&m2.hostname))
-    });
-
-    for (machine, _addresses) in &data {
-        println!("{}", machine.hostname);
-    }
-
-    Ok(())
-}
-
 #[derive(StructOpt, Debug)]
 #[structopt(name = "infrabase")]
 /// the machine inventory system
 enum Opt {
+    #[structopt(name = "ls")]
+    /// List machines
+    List,
+    #[structopt(name = "add")]
+    /// Add machine
+    Add {
+        /// Machine hostname
+        #[structopt(name = "HOSTNAME")]
+        hostname: String,
+    },
     #[structopt(name = "ssh_config")]
     /// Prints an ~/.ssh/config that lists all machines
     SshConfig {
@@ -160,9 +178,6 @@ enum Opt {
         #[structopt(long = "for", name = "MACHINE")]
         r#for: String,
     },
-    #[structopt(name = "ls")]
-    /// List machines
-    List,
 }
 
 fn run() -> Result<()> {
@@ -171,12 +186,15 @@ fn run() -> Result<()> {
 
     let matches = Opt::from_args();
     match matches {
+        Opt::List => {
+            list_machines()?;
+        },
+        Opt::Add { hostname } => {
+            add_machine(&hostname)?;
+        },
         Opt::SshConfig { r#for } => {
             print_ssh_config(&r#for)?;
         },
-        Opt::List => {
-            list_machines()?;
-        }
     }
     Ok(())
 }
