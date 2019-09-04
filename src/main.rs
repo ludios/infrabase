@@ -111,8 +111,11 @@ fn get_existing_wireguard_ips(connection: &PgConnection) -> Result<impl Iterator
         .filter_map(|row| row.wireguard_ip))
 }
 
-fn increment_ip(ip: &Ipv4Addr) -> Ipv4Addr {
+fn increment_ip(ip: &Ipv4Addr) -> Option<Ipv4Addr> {
     let mut octets = ip.octets();
+    if octets == [255, 255, 255, 255] {
+        return None;
+    }
     for i in (0..4).rev() {
         if octets[i] < 255 {
             octets[i] += 1;
@@ -121,7 +124,7 @@ fn increment_ip(ip: &Ipv4Addr) -> Ipv4Addr {
             octets[i] = 0;
         }
     }
-    Ipv4Addr::new(octets[0], octets[1], octets[2], octets[3])
+    Some(Ipv4Addr::new(octets[0], octets[1], octets[2], octets[3]))
 }
 
 //fn get_unused_wireguard_ip(connection: &PgConnection, start_ip: IpNetwork) -> Result<IpNetwork> {
@@ -256,15 +259,12 @@ mod tests {
 
     #[test]
     fn test_increment_ip() {
-        assert_eq!(increment_ip(&Ipv4Addr::new(0, 0,   0,   0)),   Ipv4Addr::new(0, 0, 0,   1));
-        assert_eq!(increment_ip(&Ipv4Addr::new(0, 0,   0,   1)),   Ipv4Addr::new(0, 0, 0,   2));
-        assert_eq!(increment_ip(&Ipv4Addr::new(0, 0,   1,   255)), Ipv4Addr::new(0, 0, 2,   0));
-        assert_eq!(increment_ip(&Ipv4Addr::new(0, 0,   255, 0)),   Ipv4Addr::new(0, 0, 255, 1));
-        assert_eq!(increment_ip(&Ipv4Addr::new(0, 2,   255, 255)), Ipv4Addr::new(0, 3, 0,   0));
-        assert_eq!(increment_ip(&Ipv4Addr::new(3, 255, 255, 255)), Ipv4Addr::new(4, 0, 0,   0));
-//        assert_raise(
-//            FunctionClauseError,
-//        fn -> increment_ip({255, 255, 255, 255}) end
-//        )
+        assert_eq!(increment_ip(&Ipv4Addr::new(0,   0,   0,   0)),   Some(Ipv4Addr::new(0, 0, 0,   1)));
+        assert_eq!(increment_ip(&Ipv4Addr::new(0,   0,   0,   1)),   Some(Ipv4Addr::new(0, 0, 0,   2)));
+        assert_eq!(increment_ip(&Ipv4Addr::new(0,   0,   1,   255)), Some(Ipv4Addr::new(0, 0, 2,   0)));
+        assert_eq!(increment_ip(&Ipv4Addr::new(0,   0,   255, 0)),   Some(Ipv4Addr::new(0, 0, 255, 1)));
+        assert_eq!(increment_ip(&Ipv4Addr::new(0,   2,   255, 255)), Some(Ipv4Addr::new(0, 3, 0,   0)));
+        assert_eq!(increment_ip(&Ipv4Addr::new(3,   255, 255, 255)), Some(Ipv4Addr::new(4, 0, 0,   0)));
+        assert_eq!(increment_ip(&Ipv4Addr::new(255, 255, 255, 255)), None);
     }
 }
