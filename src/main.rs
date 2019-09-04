@@ -9,7 +9,7 @@ extern crate diesel;
 #[macro_use]
 extern crate itertools;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::{env, path::PathBuf};
 use diesel::prelude::*;
 use diesel::pg::PgConnection;
@@ -18,6 +18,9 @@ use snafu::{ResultExt, Snafu};
 use structopt::StructOpt;
 use indoc::indoc;
 use natural_sort::HumanStr;
+use ipnetwork::IpNetwork;
+use std::net::Ipv4Addr;
+use std::iter::Iterator;
 
 use schema::{machines, network_links};
 use models::{Machine, MachineAddress, NetworkLink};
@@ -102,10 +105,45 @@ fn list_machines() -> Result<()> {
     Ok(())
 }
 
-fn add_machine(hostname: &str) -> Result<()> {
+fn get_existing_wireguard_ips(connection: &PgConnection) -> Result<impl Iterator<Item=IpNetwork>> {
+    Ok(machines::table
+        .load::<Machine>(connection)?
+        .into_iter()
+        .filter_map(|row| row.wireguard_ip))
+}
+
+fn increment_ip(ip: &Ipv4Addr) -> Ipv4Addr {
+    let mut octets = ip.octets();
+    for i in (0..4).rev() {
+        if octets[i] < 255 {
+            octets[i] += 1;
+            break;
+        } else {
+            octets[i] = 0;
+        }
+    }
+    Ipv4Addr::new(octets[0], octets[1], octets[2], octets[3])
+}
+
+//fn get_unused_wireguard_ip(connection: &PgConnection, start_ip: IpNetwork) -> Result<IpNetwork> {
+//    let existing = get_existing_wireguard_ips().collect::<HashSet<IpNetwork>>();
+//
+//}
+
+fn add_machine(hostname: &str, wireguard_ip: &Option<String>, wireguard_pubkey: &Option<String>) -> Result<()> {
     let connection = establish_connection()?;
 
     println!("{}", hostname);
+
+    println!("{:#?}", get_existing_wireguard_ips(&connection)?.collect::<Vec<_>>());
+
+    // let wireguard_ip = match wireguard_ip {
+    //     Some(ip) => ip,
+    //     None => {
+    //         // Do this inside transaction
+    //         println!("{:?}", get_existing_wireguard_ips(&connection));
+    //     }
+    // };
 
     Ok(())
 }
@@ -170,6 +208,12 @@ enum Opt {
         /// Machine hostname
         #[structopt(name = "HOSTNAME")]
         hostname: String,
+
+        /// WireGuard IP
+        wireguard_ip: Option<String>,
+
+        /// WireGuard public key
+        wireguard_pubkey: Option<String>,
     },
     #[structopt(name = "ssh_config")]
     /// Prints an ~/.ssh/config that lists all machines
@@ -189,8 +233,8 @@ fn run() -> Result<()> {
         Opt::List => {
             list_machines()?;
         },
-        Opt::Add { hostname } => {
-            add_machine(&hostname)?;
+        Opt::Add { hostname, wireguard_ip, wireguard_pubkey } => {
+            add_machine(&hostname, &wireguard_ip, &wireguard_pubkey)?;
         },
         Opt::SshConfig { r#for } => {
             print_ssh_config(&r#for)?;
@@ -203,5 +247,25 @@ fn main() {
     match run() {
         Ok(())   => {},
         Err(err) => eprintln!("An error occurred:\n{}", err),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::increment_ip;
+    use std::net::Ipv4Addr;
+
+    #[test]
+    fn test_increment_ip() {
+        assert_eq!(increment_ip(&Ipv4Addr::new(0, 0,   0,   0)),   Ipv4Addr::new(0, 0, 0,   1));
+        assert_eq!(increment_ip(&Ipv4Addr::new(0, 0,   0,   1)),   Ipv4Addr::new(0, 0, 0,   2));
+        assert_eq!(increment_ip(&Ipv4Addr::new(0, 0,   1,   255)), Ipv4Addr::new(0, 0, 2,   0));
+        assert_eq!(increment_ip(&Ipv4Addr::new(0, 0,   255, 0)),   Ipv4Addr::new(0, 0, 255, 1));
+        assert_eq!(increment_ip(&Ipv4Addr::new(0, 2,   255, 255)), Ipv4Addr::new(0, 3, 0,   0));
+        assert_eq!(increment_ip(&Ipv4Addr::new(3, 255, 255, 255)), Ipv4Addr::new(4, 0, 0,   0));
+//        assert_raise(
+//            FunctionClauseError,
+//        fn -> increment_ip({255, 255, 255, 255}) end
+//        )
     }
 }
