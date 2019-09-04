@@ -20,7 +20,6 @@ use indoc::indoc;
 use natural_sort::HumanStr;
 use ipnetwork::IpNetwork;
 use std::net::Ipv4Addr;
-use std::iter::Iterator;
 
 use schema::{machines, network_links};
 use models::{Machine, MachineAddress, NetworkLink};
