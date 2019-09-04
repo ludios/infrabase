@@ -19,7 +19,8 @@ use structopt::StructOpt;
 use indoc::indoc;
 use natural_sort::HumanStr;
 use ipnetwork::IpNetwork;
-use std::net::Ipv4Addr;
+use std::net::{IpAddr, Ipv4Addr};
+use std::iter;
 
 use schema::{machines, network_links};
 use models::{Machine, MachineAddress, NetworkLink};
@@ -37,6 +38,9 @@ enum Error {
     DieselConnection { source: diesel::ConnectionError },
 
     Var { source: env::VarError },
+
+    #[snafu(display("Could not find an available IP address to use"))]
+    NoAddressAvailable,
 }
 
 impl From<diesel::result::Error> for Error {
@@ -84,9 +88,7 @@ fn get_machines_and_addresses(connection: &PgConnection) -> DieselResult<Vec<(Ma
     })
 }
 
-fn list_machines() -> Result<()> {
-    let connection = establish_connection()?;
-
+fn list_machines(connection: &PgConnection) -> Result<()> {
     let mut data = get_machines_and_addresses(&connection)?;
 
     // natural_sort refuses to compare string segments with integer segments,
@@ -127,17 +129,27 @@ fn increment_ip(ip: &Ipv4Addr) -> Option<Ipv4Addr> {
     Some(Ipv4Addr::new(octets[0], octets[1], octets[2], octets[3]))
 }
 
-//fn get_unused_wireguard_ip(connection: &PgConnection, start_ip: IpNetwork) -> Result<IpNetwork> {
-//    let existing = get_existing_wireguard_ips().collect::<HashSet<IpNetwork>>();
-//
-//}
+fn get_unused_wireguard_ip(connection: &PgConnection, start_ip: &Ipv4Addr) -> Result<IpNetwork> {
+    let existing = get_existing_wireguard_ips(&connection)?.collect::<HashSet<IpNetwork>>();
+    let ip_iter = iter::successors(Some(start_ip.clone()), |ip| increment_ip(ip));
+    for proposed_ip in ip_iter {
+        let ipnetwork = IpNetwork::new(IpAddr::V4(proposed_ip), 32).unwrap();
+        if !existing.contains(&ipnetwork) {
+            return Ok(ipnetwork);
+        }
+    }
+    return Err(Error::NoAddressAvailable)
+}
 
-fn add_machine(hostname: &str, wireguard_ip: &Option<String>, wireguard_pubkey: &Option<String>) -> Result<()> {
-    let connection = establish_connection()?;
-
+fn add_machine(connection: &PgConnection, hostname: &str, wireguard_ip: &Option<String>, wireguard_pubkey: &Option<String>) -> Result<()> {
     println!("{}", hostname);
 
-    println!("{:#?}", get_existing_wireguard_ips(&connection)?.collect::<Vec<_>>());
+    //println!("{:#?}", get_existing_wireguard_ips(&connection)?.collect::<Vec<_>>());
+
+    // TODO: read from config
+    let start_ip = Ipv4Addr::new(10, 10, 0, 1);
+    let wireguard_ip = get_unused_wireguard_ip(&connection, &start_ip)?;
+    println!("{}", wireguard_ip);
 
     // let wireguard_ip = match wireguard_ip {
     //     Some(ip) => ip,
@@ -150,8 +162,7 @@ fn add_machine(hostname: &str, wireguard_ip: &Option<String>, wireguard_pubkey: 
     Ok(())
 }
 
-fn print_ssh_config(for_machine: &str) -> Result<()> {
-    let connection = establish_connection()?;
+fn print_ssh_config(connection: &PgConnection, for_machine: &str) -> Result<()> {
     let (data, network_links_map) = connection.transaction::<_, Error, _>(|| {
         let data = get_machines_and_addresses(&connection)?;
         let network_links_map = get_network_links_map(&connection)?;
@@ -229,17 +240,18 @@ enum Opt {
 fn run() -> Result<()> {
     import_env()?;
     env_logger::init();
+    let connection = establish_connection()?;
 
     let matches = Opt::from_args();
     match matches {
         Opt::List => {
-            list_machines()?;
+            list_machines(&connection)?;
         },
         Opt::Add { hostname, wireguard_ip, wireguard_pubkey } => {
-            add_machine(&hostname, &wireguard_ip, &wireguard_pubkey)?;
+            add_machine(&connection, &hostname, &wireguard_ip, &wireguard_pubkey)?;
         },
         Opt::SshConfig { r#for } => {
-            print_ssh_config(&r#for)?;
+            print_ssh_config(&connection, &r#for)?;
         },
     }
     Ok(())
