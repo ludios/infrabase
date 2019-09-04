@@ -131,7 +131,7 @@ fn increment_ip(ip: &Ipv4Addr) -> Option<Ipv4Addr> {
 
 fn get_unused_wireguard_ip(connection: &PgConnection, start_ip: &Ipv4Addr) -> Result<IpNetwork> {
     let existing = get_existing_wireguard_ips(&connection)?.collect::<HashSet<IpNetwork>>();
-    let ip_iter = iter::successors(Some(start_ip.clone()), |ip| increment_ip(ip));
+    let ip_iter = iter::successors(Some(start_ip.clone()), increment_ip);
     for proposed_ip in ip_iter {
         let ipnetwork = IpNetwork::new(IpAddr::V4(proposed_ip), 32).unwrap();
         if !existing.contains(&ipnetwork) {
@@ -141,23 +141,17 @@ fn get_unused_wireguard_ip(connection: &PgConnection, start_ip: &Ipv4Addr) -> Re
     return Err(Error::NoAddressAvailable)
 }
 
-fn add_machine(connection: &PgConnection, hostname: &str, wireguard_ip: &Option<String>, wireguard_pubkey: &Option<String>) -> Result<()> {
+fn add_machine(connection: &PgConnection, hostname: &str, wireguard_ip: &Option<Ipv4Addr>, wireguard_pubkey: &Option<String>) -> Result<()> {
     println!("{}", hostname);
-
-    //println!("{:#?}", get_existing_wireguard_ips(&connection)?.collect::<Vec<_>>());
 
     // TODO: read from config
     let start_ip = Ipv4Addr::new(10, 10, 0, 1);
-    let wireguard_ip = get_unused_wireguard_ip(&connection, &start_ip)?;
-    println!("{}", wireguard_ip);
+    let wireguard_ip = match wireguard_ip {
+        Some(ip) => IpNetwork::new(IpAddr::V4(*ip), 32).unwrap(),
+        None => get_unused_wireguard_ip(&connection, &start_ip)?,
+    };
 
-    // let wireguard_ip = match wireguard_ip {
-    //     Some(ip) => ip,
-    //     None => {
-    //         // Do this inside transaction
-    //         println!("{:?}", get_existing_wireguard_ips(&connection));
-    //     }
-    // };
+    println!("{}", wireguard_ip);
 
     Ok(())
 }
@@ -223,9 +217,16 @@ enum Opt {
         hostname: String,
 
         /// WireGuard IP
-        wireguard_ip: Option<String>,
+        ///
+        /// If one is not provided, an unused IP address will be selected.
+        #[structopt(long)]
+        wireguard_ip: Option<Ipv4Addr>,
 
         /// WireGuard public key
+        ///
+        /// If one is not provided, a new private key will be generated and
+        /// saved to XXX TODO where?
+        #[structopt(long)]
         wireguard_pubkey: Option<String>,
     },
     #[structopt(name = "ssh_config")]
