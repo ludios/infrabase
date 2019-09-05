@@ -262,10 +262,13 @@ fn run() -> Result<()> {
 }
 
 fn main() {
-    match run() {
-        Ok(())   => {},
-        Err(err) => eprintln!("An error occurred:\n{}", err),
-    }
+    std::process::exit(match run() {
+        Ok(())   => 0,
+        Err(err) => {
+            eprintln!("An error occurred:\n{}", err);
+            1
+        },
+    });
 }
 
 #[cfg(test)]
