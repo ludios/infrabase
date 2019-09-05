@@ -45,6 +45,8 @@ enum Error {
 
     IntoInner { source: IntoInnerError<TabWriter<Vec<u8>>> },
 
+    AddrParse { source: std::net::AddrParseError },
+
     #[snafu(display("Could not find an unused WireGuard IP address; check WIREGUARD_IP_START and WIREGUARD_IP_END"))]
     NoWireGuardAddressAvailable,
 }
@@ -164,8 +166,8 @@ fn get_unused_wireguard_ip(connection: &PgConnection, start_ip: &Ipv4Addr, end_i
 fn add_machine(connection: &PgConnection, hostname: &str, wireguard_ip: &Option<Ipv4Addr>, wireguard_pubkey: &Option<String>) -> Result<()> {
     println!("{}", hostname);
 
-    let start_ip = env::var("WIREGUARD_IP_START").context(Var)?.parse::<Ipv4Addr>().unwrap();
-    let end_ip = env::var("WIREGUARD_IP_END").context(Var)?.parse::<Ipv4Addr>().unwrap();
+    let start_ip = env::var("WIREGUARD_IP_START").context(Var)?.parse::<Ipv4Addr>().context(AddrParse)?;
+    let end_ip = env::var("WIREGUARD_IP_END").context(Var)?.parse::<Ipv4Addr>().context(AddrParse)?;
     let wireguard_ip = match wireguard_ip {
         Some(ip) => IpNetwork::new(IpAddr::V4(*ip), 32).unwrap(),
         None => get_unused_wireguard_ip(&connection, &start_ip, &end_ip)?,
