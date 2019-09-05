@@ -9,8 +9,10 @@ extern crate diesel;
 #[macro_use]
 extern crate itertools;
 
+use std::iter;
 use std::collections::{HashMap, HashSet};
 use std::{env, path::PathBuf};
+use std::net::{IpAddr, Ipv4Addr};
 use diesel::prelude::*;
 use diesel::pg::PgConnection;
 use dotenv;
@@ -19,8 +21,6 @@ use structopt::StructOpt;
 use indoc::indoc;
 use natural_sort::HumanStr;
 use ipnetwork::IpNetwork;
-use std::net::{IpAddr, Ipv4Addr};
-use std::iter;
 
 use schema::{machines, network_links};
 use models::{Machine, MachineAddress, NetworkLink};
