@@ -144,8 +144,7 @@ fn get_unused_wireguard_ip(connection: &PgConnection, start_ip: &Ipv4Addr) -> Re
 fn add_machine(connection: &PgConnection, hostname: &str, wireguard_ip: &Option<Ipv4Addr>, wireguard_pubkey: &Option<String>) -> Result<()> {
     println!("{}", hostname);
 
-    // TODO: read from config
-    let start_ip = Ipv4Addr::new(10, 10, 0, 1);
+    let start_ip = env::var("WIREGUARD_IP_START").context(Var)?.parse::<Ipv4Addr>().unwrap();
     let wireguard_ip = match wireguard_ip {
         Some(ip) => IpNetwork::new(IpAddr::V4(*ip), 32).unwrap(),
         None => get_unused_wireguard_ip(&connection, &start_ip)?,
