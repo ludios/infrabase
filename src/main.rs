@@ -14,7 +14,7 @@ use std::collections::{HashMap, HashSet};
 use std::{env, path::PathBuf};
 use std::net::{IpAddr, Ipv4Addr};
 use std::io::Write;
-use tabwriter::TabWriter;
+use tabwriter::{TabWriter, IntoInnerError};
 use diesel::prelude::*;
 use diesel::pg::PgConnection;
 use dotenv;
@@ -43,7 +43,7 @@ enum Error {
 
     Io { source: std::io::Error },
 
-    Other { source: Box<dyn std::error::Error> },
+    IntoInner { source: IntoInnerError<TabWriter<Vec<u8>>> },
 
     #[snafu(display("Could not find an unused WireGuard IP address; check WIREGUARD_IP_START and WIREGUARD_IP_END"))]
     NoWireGuardAddressAvailable,
@@ -117,7 +117,7 @@ fn list_machines(connection: &PgConnection) -> Result<()> {
         writeln!(tw, "{}\t{}", machine.hostname, format_wireguard_ip(&machine.wireguard_ip)).context(Io)?;
     }
 
-    let bytes = tw.into_inner().map_err(|e| Box::new(e) as Box<dyn std::error::Error>).context(Other)?;
+    let bytes = tw.into_inner().context(IntoInner)?;
     std::io::stdout().write_all(&bytes).context(Io)?;
 
     Ok(())
