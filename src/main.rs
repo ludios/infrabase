@@ -129,13 +129,16 @@ fn increment_ip(ip: &Ipv4Addr) -> Option<Ipv4Addr> {
     Some(Ipv4Addr::new(octets[0], octets[1], octets[2], octets[3]))
 }
 
-fn get_unused_wireguard_ip(connection: &PgConnection, start_ip: &Ipv4Addr) -> Result<IpNetwork> {
+fn get_unused_wireguard_ip(connection: &PgConnection, start_ip: &Ipv4Addr, end_ip: &Ipv4Addr) -> Result<IpNetwork> {
     let existing = get_existing_wireguard_ips(&connection)?.collect::<HashSet<IpNetwork>>();
     let ip_iter = iter::successors(Some(start_ip.clone()), increment_ip);
     for proposed_ip in ip_iter {
         let ipnetwork = IpNetwork::new(IpAddr::V4(proposed_ip), 32).unwrap();
         if !existing.contains(&ipnetwork) {
             return Ok(ipnetwork);
+        }
+        if &proposed_ip == end_ip {
+            break;
         }
     }
     return Err(Error::NoAddressAvailable)
@@ -145,9 +148,10 @@ fn add_machine(connection: &PgConnection, hostname: &str, wireguard_ip: &Option<
     println!("{}", hostname);
 
     let start_ip = env::var("WIREGUARD_IP_START").context(Var)?.parse::<Ipv4Addr>().unwrap();
+    let end_ip = env::var("WIREGUARD_IP_END").context(Var)?.parse::<Ipv4Addr>().unwrap();
     let wireguard_ip = match wireguard_ip {
         Some(ip) => IpNetwork::new(IpAddr::V4(*ip), 32).unwrap(),
-        None => get_unused_wireguard_ip(&connection, &start_ip)?,
+        None => get_unused_wireguard_ip(&connection, &start_ip, &end_ip)?,
     };
 
     println!("{}", wireguard_ip);
