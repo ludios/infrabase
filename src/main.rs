@@ -13,6 +13,8 @@ use std::iter;
 use std::collections::{HashMap, HashSet};
 use std::{env, path::PathBuf};
 use std::net::{IpAddr, Ipv4Addr};
+use std::io::Write;
+use tabwriter::TabWriter;
 use diesel::prelude::*;
 use diesel::pg::PgConnection;
 use dotenv;
@@ -38,6 +40,10 @@ enum Error {
     DieselConnection { source: diesel::ConnectionError },
 
     Var { source: env::VarError },
+
+    Io { source: std::io::Error },
+
+    Other { source: Box<dyn std::error::Error> },
 
     #[snafu(display("Could not find an unused WireGuard IP address; check WIREGUARD_IP_START and WIREGUARD_IP_END"))]
     NoWireGuardAddressAvailable,
@@ -88,6 +94,13 @@ fn get_machines_and_addresses(connection: &PgConnection) -> DieselResult<Vec<(Ma
     })
 }
 
+fn format_wireguard_ip(wireguard_ip: &Option<IpNetwork>) -> String {
+    match wireguard_ip {
+        Some(ipnetwork) => ipnetwork.ip().to_string(),
+        None => "-".to_string(),
+    }
+}
+
 fn list_machines(connection: &PgConnection) -> Result<()> {
     let mut data = get_machines_and_addresses(&connection)?;
 
@@ -99,9 +112,13 @@ fn list_machines(connection: &PgConnection) -> Result<()> {
             .unwrap_or_else(|| m1.hostname.cmp(&m2.hostname))
     });
 
+    let mut tw = TabWriter::new(vec![]);
     for (machine, _addresses) in &data {
-        println!("{}", machine.hostname);
+        writeln!(tw, "{}\t{}", machine.hostname, format_wireguard_ip(&machine.wireguard_ip)).context(Io)?;
     }
+
+    let bytes = tw.into_inner().map_err(|e| Box::new(e) as Box<dyn std::error::Error>).context(Other)?;
+    std::io::stdout().write_all(&bytes).context(Io)?;
 
     Ok(())
 }

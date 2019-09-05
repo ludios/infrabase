@@ -19,3 +19,4 @@ env_logger = "0.6.2"
 indoc = { version = "0.3.3", features = ["unstable"] }
 itertools = "0.8.0"
 natural_sort = { git = "https://github.com/ludios/natural-sort-rs" }
+tabwriter = "1.1.0"
