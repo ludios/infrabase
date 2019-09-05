@@ -103,6 +103,13 @@ fn format_wireguard_ip(wireguard_ip: &Option<IpNetwork>) -> String {
     }
 }
 
+fn format_provider(provider: &Option<i32>) -> String {
+    match provider {
+        Some(p) => p.to_string(),
+        None => "-".to_string(),
+    }
+}
+
 fn list_machines(connection: &PgConnection) -> Result<()> {
     let mut data = get_machines_and_addresses(&connection)?;
 
@@ -115,8 +122,15 @@ fn list_machines(connection: &PgConnection) -> Result<()> {
     });
 
     let mut tw = TabWriter::new(vec![]);
+    writeln!(tw, "HOSTNAME\tWIREGUARD\tOWNER\tPROVIDER");
+    writeln!(tw, "--------\t---------\t-----\t--------");
     for (machine, _addresses) in &data {
-        writeln!(tw, "{}\t{}", machine.hostname, format_wireguard_ip(&machine.wireguard_ip)).context(Io)?;
+        writeln!(tw, "{}\t{}\t{}\t{}",
+                 machine.hostname,
+                 format_wireguard_ip(&machine.wireguard_ip),
+                 machine.owner,
+                 format_provider(&machine.provider_id)
+        ).context(Io)?;
     }
 
     let bytes = tw.into_inner().context(IntoInner)?;
