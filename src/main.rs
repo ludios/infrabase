@@ -39,8 +39,8 @@ enum Error {
 
     Var { source: env::VarError },
 
-    #[snafu(display("Could not find an available IP address to use"))]
-    NoAddressAvailable,
+    #[snafu(display("Could not find an unused WireGuard IP address; check WIREGUARD_IP_START and WIREGUARD_IP_END"))]
+    NoWireGuardAddressAvailable,
 }
 
 impl From<diesel::result::Error> for Error {
@@ -141,7 +141,7 @@ fn get_unused_wireguard_ip(connection: &PgConnection, start_ip: &Ipv4Addr, end_i
             break;
         }
     }
-    return Err(Error::NoAddressAvailable)
+    return Err(Error::NoWireGuardAddressAvailable)
 }
 
 fn add_machine(connection: &PgConnection, hostname: &str, wireguard_ip: &Option<Ipv4Addr>, wireguard_pubkey: &Option<String>) -> Result<()> {
