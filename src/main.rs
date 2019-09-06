@@ -2,23 +2,25 @@
 
 pub mod schema;
 pub mod models;
+mod wireguard;
 
-#[macro_use]
-extern crate diesel;
+#[macro_use] extern crate diesel;
+#[macro_use] extern crate itertools;
+#[macro_use] extern crate runtime_fmt;
 
-#[macro_use]
-extern crate itertools;
-
+use std::io;
 use std::iter;
 use std::collections::{HashMap, HashSet};
 use std::{env, path::PathBuf};
 use std::net::{IpAddr, Ipv4Addr};
 use std::io::Write;
+use std::path::Path;
+use std::fs;
 use tabwriter::{TabWriter, IntoInnerError};
 use diesel::prelude::*;
 use diesel::pg::PgConnection;
 use dotenv;
-use snafu::{ResultExt, Snafu};
+use snafu::{ResultExt, Snafu, Backtrace, ErrorCompat};
 use structopt::StructOpt;
 use indoc::indoc;
 use natural_sort::HumanStr;
@@ -28,27 +30,32 @@ use schema::{machines, network_links};
 use models::{Machine, MachineAddress, NetworkLink};
 
 #[derive(Debug, Snafu)]
-enum Error {
+pub(crate) enum Error {
     #[snafu(display("Unable to read configuration from {}: {}", path.display(), source))]
     ReadConfiguration { source: dotenv::DotenvError, path: PathBuf },
-
     #[snafu(display("Could not find source machine {:?} in database", source_machine))]
     MissingSourceMachine { source_machine: String },
-
     Diesel { source: diesel::result::Error },
-
     DieselConnection { source: diesel::ConnectionError },
-
     Var { source: env::VarError },
-
-    Io { source: std::io::Error },
-
+    Io { source: std::io::Error, backtrace: Backtrace },
     IntoInner { source: IntoInnerError<TabWriter<Vec<u8>>> },
-
     AddrParse { source: std::net::AddrParseError },
-
     #[snafu(display("Could not find an unused WireGuard IP address; check WIREGUARD_IP_START and WIREGUARD_IP_END"))]
     NoWireGuardAddressAvailable,
+    NonZeroExit,
+    NoStdin,
+    FormatString,
+    NoParentDirectory,
+}
+
+impl From<io::Error> for Error {
+    fn from(err: io::Error) -> Self {
+        Error::Io {
+            source: err,
+            backtrace: Backtrace::new(),
+        }
+    }
 }
 
 impl From<diesel::result::Error> for Error {
@@ -122,7 +129,7 @@ fn list_machines(connection: &PgConnection) -> Result<()> {
     });
 
     let mut tw = TabWriter::new(vec![]);
-    writeln!(tw, "HOSTNAME\tWIREGUARD\tOWNER\tPROVIDER");
+    writeln!(tw, "HOSTNAME\tWIREGUARD\tOWNER\tPROVIDER").context(Io)?;
     writeln!(tw, "--------\t---------\t-----\t--------");
     for (machine, _addresses) in &data {
         writeln!(tw, "{}\t{}\t{}\t{}",
@@ -182,9 +189,24 @@ fn add_machine(connection: &PgConnection, hostname: &str, wireguard_ip: &Option<
 
     let start_ip = env::var("WIREGUARD_IP_START").context(Var)?.parse::<Ipv4Addr>().context(AddrParse)?;
     let end_ip = env::var("WIREGUARD_IP_END").context(Var)?.parse::<Ipv4Addr>().context(AddrParse)?;
+    let path_template = env::var("WIREGUARD_PRIVATE_KEY_PATH_TEMPLATE").context(Var)?;
     let wireguard_ip = match wireguard_ip {
         Some(ip) => IpNetwork::new(IpAddr::V4(*ip), 32).unwrap(),
         None => get_unused_wireguard_ip(&connection, &start_ip, &end_ip)?,
+    };
+    let wireguard_pubkey = match wireguard_pubkey {
+        Some(pubkey) => pubkey.clone().into_bytes(),
+        None => {
+            let wireguard::Keypair { privkey, pubkey } = wireguard::generate_keypair()?;
+
+            let private_key_file = rt_format!(path_template, hostname = hostname, wireguard_ip = wireguard_ip).map_err(|_| Error::FormatString)?;
+            let private_key_path = Path::new(&private_key_file);
+            fs::create_dir_all(private_key_path.parent().ok_or(Error::NoParentDirectory)?)?;
+            let mut file = fs::File::create(private_key_file).context(Io)?;
+
+            file.write_all(&privkey).context(Io)?;
+            pubkey
+        },
     };
 
     println!("{}", wireguard_ip);
@@ -296,9 +318,12 @@ fn run() -> Result<()> {
 
 fn main() {
     std::process::exit(match run() {
-        Ok(())   => 0,
+        Ok(()) => 0,
         Err(err) => {
             eprintln!("An error occurred:\n{}", err);
+            if let Some(bt) = err.backtrace() {
+                eprintln!("{}", bt);
+            }
             1
         },
     });
