@@ -130,7 +130,7 @@ fn list_machines(connection: &PgConnection) -> Result<()> {
 
     let mut tw = TabWriter::new(vec![]);
     writeln!(tw, "HOSTNAME\tWIREGUARD\tOWNER\tPROVIDER").context(Io)?;
-    writeln!(tw, "--------\t---------\t-----\t--------");
+    writeln!(tw, "--------\t---------\t-----\t--------").context(Io)?;
     for (machine, _addresses) in &data {
         writeln!(tw, "{}\t{}\t{}\t{}",
                  machine.hostname,
