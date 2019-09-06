@@ -110,7 +110,7 @@ fn format_wireguard_ip(wireguard_ip: &Option<IpNetwork>) -> String {
     }
 }
 
-fn format_provider(provider: &Option<i32>) -> String {
+fn format_provider(provider: Option<i32>) -> String {
     match provider {
         Some(p) => p.to_string(),
         None => "-".to_string(),
@@ -136,7 +136,7 @@ fn list_machines(connection: &PgConnection) -> Result<()> {
                  machine.hostname,
                  format_wireguard_ip(&machine.wireguard_ip),
                  machine.owner,
-                 format_provider(&machine.provider_id)
+                 format_provider(machine.provider_id)
         ).context(Io)?;
     }
 
@@ -153,6 +153,7 @@ fn get_existing_wireguard_ips(connection: &PgConnection) -> Result<impl Iterator
         .filter_map(|row| row.wireguard_ip))
 }
 
+#[allow(clippy::trivially_copy_pass_by_ref)]
 fn increment_ip(ip: &Ipv4Addr) -> Option<Ipv4Addr> {
     let mut octets = ip.octets();
     if octets == [255, 255, 255, 255] {
@@ -169,30 +170,30 @@ fn increment_ip(ip: &Ipv4Addr) -> Option<Ipv4Addr> {
     Some(Ipv4Addr::new(octets[0], octets[1], octets[2], octets[3]))
 }
 
-fn get_unused_wireguard_ip(connection: &PgConnection, start_ip: &Ipv4Addr, end_ip: &Ipv4Addr) -> Result<IpNetwork> {
+fn get_unused_wireguard_ip(connection: &PgConnection, start_ip: Ipv4Addr, end_ip: Ipv4Addr) -> Result<IpNetwork> {
     let existing = get_existing_wireguard_ips(&connection)?.collect::<HashSet<IpNetwork>>();
-    let ip_iter = iter::successors(Some(start_ip.clone()), increment_ip);
+    let ip_iter = iter::successors(Some(start_ip), increment_ip);
     for proposed_ip in ip_iter {
         let ipnetwork = IpNetwork::new(IpAddr::V4(proposed_ip), 32).unwrap();
         if !existing.contains(&ipnetwork) {
             return Ok(ipnetwork);
         }
-        if &proposed_ip == end_ip {
+        if proposed_ip == end_ip {
             break;
         }
     }
-    return Err(Error::NoWireGuardAddressAvailable)
+    Err(Error::NoWireGuardAddressAvailable)
 }
 
-fn add_machine(connection: &PgConnection, hostname: &str, wireguard_ip: &Option<Ipv4Addr>, wireguard_pubkey: &Option<String>) -> Result<()> {
+fn add_machine(connection: &PgConnection, hostname: &str, wireguard_ip: Option<Ipv4Addr>, wireguard_pubkey: &Option<String>) -> Result<()> {
     println!("{}", hostname);
 
     let start_ip = env::var("WIREGUARD_IP_START").context(Var)?.parse::<Ipv4Addr>().context(AddrParse)?;
     let end_ip = env::var("WIREGUARD_IP_END").context(Var)?.parse::<Ipv4Addr>().context(AddrParse)?;
     let path_template = env::var("WIREGUARD_PRIVATE_KEY_PATH_TEMPLATE").context(Var)?;
     let wireguard_ip = match wireguard_ip {
-        Some(ip) => IpNetwork::new(IpAddr::V4(*ip), 32).unwrap(),
-        None => get_unused_wireguard_ip(&connection, &start_ip, &end_ip)?,
+        Some(ip) => IpNetwork::new(IpAddr::V4(ip), 32).unwrap(),
+        None => get_unused_wireguard_ip(&connection, start_ip, end_ip)?,
     };
     let wireguard_pubkey = match wireguard_pubkey {
         Some(pubkey) => pubkey.clone().into_bytes(),
@@ -307,7 +308,7 @@ fn run() -> Result<()> {
             list_machines(&connection)?;
         },
         Opt::Add { hostname, wireguard_ip, wireguard_pubkey } => {
-            add_machine(&connection, &hostname, &wireguard_ip, &wireguard_pubkey)?;
+            add_machine(&connection, &hostname, wireguard_ip, &wireguard_pubkey)?;
         },
         Opt::SshConfig { r#for } => {
             print_ssh_config(&connection, &r#for)?;
