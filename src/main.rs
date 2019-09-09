@@ -242,12 +242,12 @@ fn add_machine(
     let ssh_port      = ssh_port.map_or_else(|| env_var("DEFAULT_SSH_PORT")?.parse::<u16>().context(ParseInt { var: "DEFAULT_SSH_PORT" }), Ok)?;
     let ssh_user      = ssh_user.map_or_else(|| env_var("DEFAULT_SSH_USER"), Ok)?;
     let owner         = owner.map_or_else(|| env_var("DEFAULT_OWNER"), Ok)?;
-    let provider_id   = provider.map_or_else(|| -> Result<_> {
-        Ok(match env_var("DEFAULT_PROVIDER") {
+    let provider_id   = ok_or_else!(provider,
+        match env_var("DEFAULT_PROVIDER") {
             Ok(s) => Some(s.parse::<u32>().context(ParseInt { var: "DEFAULT_PROVIDER" })?),
             Err(_) => None,
-        })
-    }, |id| Ok(Some(id)))?;
+        }
+    );
 
     let wireguard_ip = match wireguard_ip {
         Some(ip) => IpNetwork::new(IpAddr::V4(ip), 32).unwrap(),
