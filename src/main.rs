@@ -240,21 +240,21 @@ fn add_machine(
     wireguard_pubkey: &Option<String>,
     provider: Option<u32>,
 ) -> Result<()> {
-    let default_ssh_port = env_var("DEFAULT_SSH_PORT")?.parse::<u16>().context(ParseInt { var: "DEFAULT_SSH_PORT" })?;
-    let default_ssh_user = env_var("DEFAULT_SSH_USER")?;
-    let start_ip         = env_var("WIREGUARD_IP_START")?.parse::<Ipv4Addr>().context(AddrParse { var: "WIREGUARD_IP_START" })?;
-    let end_ip           = env_var("WIREGUARD_IP_END")?.parse::<Ipv4Addr>().context(AddrParse { var: "WIREGUARD_IP_END" })?;
-    let path_template    = env_var("WIREGUARD_PRIVATE_KEY_PATH_TEMPLATE")?;
-    let owner            = unwrap_or_else!(owner, env_var("DEFAULT_OWNER")?);
-    let provider         = ok_or_else!(provider,
+    // Required environmental variables
+    let start_ip      = env_var("WIREGUARD_IP_START")?.parse::<Ipv4Addr>().context(AddrParse { var: "WIREGUARD_IP_START" })?;
+    let end_ip        = env_var("WIREGUARD_IP_END")?.parse::<Ipv4Addr>().context(AddrParse { var: "WIREGUARD_IP_END" })?;
+    let path_template = env_var("WIREGUARD_PRIVATE_KEY_PATH_TEMPLATE")?;
+    // Optional environmntal variables
+    let ssh_port      = unwrap_or_else!(ssh_port, env_var("DEFAULT_SSH_PORT")?.parse::<u16>().context(ParseInt { var: "DEFAULT_SSH_PORT" })?);
+    let ssh_user      = unwrap_or_else!(ssh_user, env_var("DEFAULT_SSH_USER")?);
+    let owner         = unwrap_or_else!(owner, env_var("DEFAULT_OWNER")?);
+    let provider      = ok_or_else!(provider,
         match env_var("DEFAULT_PROVIDER") {
             Ok(s) => Some(s.parse::<u32>().context(ParseInt { var: "DEFAULT_PROVIDER" })?),
             Err(_) => None,
         }
     );
 
-    let ssh_port = ssh_port.unwrap_or(default_ssh_port);
-    let ssh_user = ssh_user.unwrap_or(default_ssh_user);
     let wireguard_ip = match wireguard_ip {
         Some(ip) => IpNetwork::new(IpAddr::V4(ip), 32).unwrap(),
         None => get_unused_wireguard_ip(&connection, start_ip, end_ip)?,
@@ -273,8 +273,6 @@ fn add_machine(
             pubkey
         },
     };
-
-    println!("{}", wireguard_ip);
 
     Ok(())
 }
