@@ -214,15 +214,6 @@ fn env_var(var: &str) -> Result<String> {
     env::var(var).context(Var { var })
 }
 
-macro_rules! unwrap_or_else {
-    ($opt:expr, $else:expr) => {
-        match $opt {
-            Some(x) => x,
-            None => $else
-        }
-    };
-}
-
 macro_rules! ok_or_else {
     ($opt:expr, $else:expr) => {
         match $opt {
@@ -248,9 +239,9 @@ fn add_machine(
     let end_ip        = env_var("WIREGUARD_IP_END")?.parse::<Ipv4Addr>().context(AddrParse { var: "WIREGUARD_IP_END" })?;
     let path_template = env_var("WIREGUARD_PRIVATE_KEY_PATH_TEMPLATE")?;
     // Optional environmntal variables
-    let ssh_port      = unwrap_or_else!(ssh_port, env_var("DEFAULT_SSH_PORT")?.parse::<u16>().context(ParseInt { var: "DEFAULT_SSH_PORT" })?);
-    let ssh_user      = unwrap_or_else!(ssh_user, env_var("DEFAULT_SSH_USER")?);
-    let owner         = unwrap_or_else!(owner, env_var("DEFAULT_OWNER")?);
+    let ssh_port      = ssh_port.map_or_else(|| env_var("DEFAULT_SSH_PORT")?.parse::<u16>().context(ParseInt { var: "DEFAULT_SSH_PORT" }), Ok)?;
+    let ssh_user      = ssh_user.map_or_else(|| env_var("DEFAULT_SSH_USER"), Ok)?;
+    let owner         = owner.map_or_else(|| env_var("DEFAULT_OWNER"), Ok)?;
     let provider_id   = ok_or_else!(provider,
         match env_var("DEFAULT_PROVIDER") {
             Ok(s) => Some(s.parse::<u32>().context(ParseInt { var: "DEFAULT_PROVIDER" })?),
