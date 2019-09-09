@@ -17,6 +17,8 @@ use std::net::{IpAddr, Ipv4Addr};
 use std::io::Write;
 use std::path::Path;
 use std::fs;
+use std::str;
+use std::convert::TryFrom;
 use tabwriter::{TabWriter, IntoInnerError};
 use diesel::prelude::*;
 use diesel::pg::PgConnection;
@@ -28,7 +30,7 @@ use natural_sort::HumanStr;
 use ipnetwork::IpNetwork;
 
 use schema::{machines, network_links, providers};
-use models::{Machine, MachineAddress, NetworkLink, Provider};
+use models::{Machine, NewMachine, MachineAddress, NetworkLink, Provider};
 
 #[derive(Debug, Snafu)]
 pub(crate) enum Error {
@@ -230,6 +232,7 @@ macro_rules! ok_or_else {
     };
 }
 
+#[allow(clippy::too_many_arguments)]
 fn add_machine(
     connection: &PgConnection,
     hostname: &str,
@@ -248,7 +251,7 @@ fn add_machine(
     let ssh_port      = unwrap_or_else!(ssh_port, env_var("DEFAULT_SSH_PORT")?.parse::<u16>().context(ParseInt { var: "DEFAULT_SSH_PORT" })?);
     let ssh_user      = unwrap_or_else!(ssh_user, env_var("DEFAULT_SSH_USER")?);
     let owner         = unwrap_or_else!(owner, env_var("DEFAULT_OWNER")?);
-    let provider      = ok_or_else!(provider,
+    let provider_id   = ok_or_else!(provider,
         match env_var("DEFAULT_PROVIDER") {
             Ok(s) => Some(s.parse::<u32>().context(ParseInt { var: "DEFAULT_PROVIDER" })?),
             Err(_) => None,
@@ -273,6 +276,20 @@ fn add_machine(
             pubkey
         },
     };
+
+    let machine = NewMachine {
+        hostname: hostname.into(),
+        wireguard_ip: Some(wireguard_ip),
+        wireguard_pubkey: Some(str::from_utf8(&wireguard_pubkey).unwrap().to_string()),
+        ssh_port: Some(i32::from(ssh_port)),
+        ssh_user: Some(ssh_user),
+        owner,
+        provider_id: provider_id.map(|n| i32::try_from(n).unwrap()),
+    };
+
+    diesel::insert_into(machines::table)
+        .values(&machine)
+        .execute(connection)?;
 
     Ok(())
 }

@@ -21,3 +21,4 @@ itertools = "0.8.0"
 natural_sort = { git = "https://github.com/ludios/natural-sort-rs" }
 tabwriter = "1.1.0"
 runtime-fmt = "0.4.0"
+bstr = "0.2.8"

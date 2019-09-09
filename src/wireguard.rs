@@ -1,6 +1,7 @@
-use snafu::ResultExt;
 use std::io::Write;
 use std::process::{Command, Stdio};
+use snafu::ResultExt;
+use bstr::ByteSlice;
 use super::Error;
 use super::Io;
 
@@ -32,5 +33,8 @@ pub(crate) fn generate_keypair() -> Result<Keypair, Error> {
     let privkey = run("wg", &["genkey"], None)?;
     let pubkey = run("wg", &["pubkey"], Some(&privkey))?;
 
-    Ok(Keypair { privkey, pubkey })
+    Ok(Keypair {
+        privkey: privkey.trim_end().to_vec(),
+        pubkey: pubkey.trim_end().to_vec()
+    })
 }

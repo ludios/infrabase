@@ -16,6 +16,18 @@ pub struct Machine {
     pub provider_id: Option<i32>,
 }
 
+#[derive(Insertable, Debug)]
+#[table_name = "machines"]
+pub struct NewMachine {
+    pub hostname: String,
+    pub wireguard_ip: Option<IpNetwork>,
+    pub wireguard_pubkey: Option<String>,
+    pub ssh_port: Option<i32>,
+    pub ssh_user: Option<String>,
+    pub owner: String,
+    pub provider_id: Option<i32>,
+}
+
 #[derive(Identifiable, Queryable, Associations, Debug)]
 #[primary_key(hostname, network, address)]
 #[belongs_to(Machine, foreign_key = "hostname")]
