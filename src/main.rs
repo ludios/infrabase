@@ -1,4 +1,5 @@
 #![feature(proc_macro_hygiene)]
+#![feature(result_map_or_else)]
 
 pub mod schema;
 pub mod models;
@@ -41,8 +42,10 @@ pub(crate) enum Error {
     Var { source: env::VarError, var: String },
     Io { source: std::io::Error, backtrace: Backtrace },
     IntoInner { source: IntoInnerError<TabWriter<Vec<u8>>> },
-    ParseInt { source: std::num::ParseIntError },
-    AddrParse { source: std::net::AddrParseError },
+    #[snafu(display("Could not parse variable {} as integer", var))]
+    ParseInt { source: std::num::ParseIntError, var: String },
+    #[snafu(display("Could not parse variable {} as IP address", var))]
+    AddrParse { source: std::net::AddrParseError, var: String },
     #[snafu(display("Could not find an unused WireGuard IP address; check WIREGUARD_IP_START and WIREGUARD_IP_END"))]
     NoWireGuardAddressAvailable,
     NonZeroExit,
@@ -209,6 +212,24 @@ fn env_var(var: &str) -> Result<String> {
     env::var(var).context(Var { var })
 }
 
+macro_rules! unwrap_or_else {
+    ($opt:expr, $else_:expr) => {
+        match $opt {
+            Some(x) => x,
+            None => $else_
+        }
+    };
+}
+
+macro_rules! ok_or_else {
+    ($opt:expr, $else:expr) => {
+        match $opt {
+            Some(x) => Some(x),
+            None => $else
+        }
+    };
+}
+
 fn add_machine(
     connection: &PgConnection,
     hostname: &str,
@@ -216,19 +237,21 @@ fn add_machine(
     ssh_port: Option<u16>,
     ssh_user: Option<String>,
     wireguard_ip: Option<Ipv4Addr>,
-    wireguard_pubkey: &Option<String>
+    wireguard_pubkey: &Option<String>,
+    provider: Option<u32>,
 ) -> Result<()> {
-    let default_ssh_port = env_var("DEFAULT_SSH_PORT")?.parse::<u16>().context(ParseInt)?;
+    let default_ssh_port = env_var("DEFAULT_SSH_PORT")?.parse::<u16>().context(ParseInt { var: "DEFAULT_SSH_PORT" })?;
     let default_ssh_user = env_var("DEFAULT_SSH_USER")?;
-    let start_ip         = env_var("WIREGUARD_IP_START")?.parse::<Ipv4Addr>().context(AddrParse)?;
-    let end_ip           = env_var("WIREGUARD_IP_END")?.parse::<Ipv4Addr>().context(AddrParse)?;
+    let start_ip         = env_var("WIREGUARD_IP_START")?.parse::<Ipv4Addr>().context(AddrParse { var: "WIREGUARD_IP_START" })?;
+    let end_ip           = env_var("WIREGUARD_IP_END")?.parse::<Ipv4Addr>().context(AddrParse { var: "WIREGUARD_IP_END" })?;
     let path_template    = env_var("WIREGUARD_PRIVATE_KEY_PATH_TEMPLATE")?;
-    let owner = match owner {
-        Some(owner) => owner,
-        None => {
-            env_var("DEFAULT_OWNER")?
+    let owner            = unwrap_or_else!(owner, env_var("DEFAULT_OWNER")?);
+    let provider         = ok_or_else!(provider,
+        match env_var("DEFAULT_PROVIDER") {
+            Ok(s) => Some(s.parse::<u32>().context(ParseInt { var: "DEFAULT_PROVIDER" })?),
+            Err(_) => None,
         }
-    };
+    );
 
     let ssh_port = ssh_port.unwrap_or(default_ssh_port);
     let ssh_user = ssh_user.unwrap_or(default_ssh_user);
@@ -322,6 +345,8 @@ enum InfrabaseCommand {
         hostname: String,
 
         /// Machine owner
+        ///
+        /// If one is not provided, DEFAULT_OWNER will be used from the environment.
         #[structopt(long)]
         owner: Option<String>,
 
@@ -346,9 +371,17 @@ enum InfrabaseCommand {
         /// WireGuard public key
         ///
         /// If one is not provided, a new private key will be generated and
-        /// saved to XXX TODO where?
+        /// saved to a file specified by WIREGUARD_PRIVATE_KEY_PATH_TEMPLATE
+        /// from the environment.
         #[structopt(long)]
         wireguard_pubkey: Option<String>,
+
+        /// Provider
+        ///
+        /// If one is not provided, DEFAULT_OWNER will be used from the environment
+        /// if set, otherwise it will be left unset.
+        #[structopt(long)]
+        provider: Option<u32>,
     },
 
     #[structopt(name = "ssh_config")]
@@ -380,8 +413,8 @@ fn run() -> Result<()> {
         InfrabaseCommand::List => {
             list_machines(&connection)?;
         },
-        InfrabaseCommand::Add { hostname, owner, ssh_port, ssh_user, wireguard_ip, wireguard_pubkey } => {
-            add_machine(&connection, &hostname, owner, ssh_port, ssh_user, wireguard_ip, &wireguard_pubkey)?;
+        InfrabaseCommand::Add { hostname, owner, ssh_port, ssh_user, wireguard_ip, wireguard_pubkey, provider } => {
+            add_machine(&connection, &hostname, owner, ssh_port, ssh_user, wireguard_ip, &wireguard_pubkey, provider)?;
         },
         InfrabaseCommand::SshConfig { r#for } => {
             print_ssh_config(&connection, &r#for)?;
