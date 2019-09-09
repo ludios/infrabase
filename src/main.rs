@@ -37,9 +37,11 @@ pub(crate) enum Error {
     MissingSourceMachine { source_machine: String },
     Diesel { source: diesel::result::Error },
     DieselConnection { source: diesel::ConnectionError },
-    Var { source: env::VarError },
+    #[snafu(display("Could not get variable {} from environment", var))]
+    Var { source: env::VarError, var: String },
     Io { source: std::io::Error, backtrace: Backtrace },
     IntoInner { source: IntoInnerError<TabWriter<Vec<u8>>> },
+    ParseInt { source: std::num::ParseIntError },
     AddrParse { source: std::net::AddrParseError },
     #[snafu(display("Could not find an unused WireGuard IP address; check WIREGUARD_IP_START and WIREGUARD_IP_END"))]
     NoWireGuardAddressAvailable,
@@ -74,7 +76,7 @@ fn import_env() -> Result<()> {
 }
 
 fn establish_connection() -> Result<PgConnection> {
-    let database_url = env::var("DATABASE_URL").context(Var)?;
+    let database_url = env_var("DATABASE_URL")?;
     Ok(PgConnection::establish(&database_url).context(DieselConnection)?)
 }
 
@@ -185,12 +187,33 @@ fn get_unused_wireguard_ip(connection: &PgConnection, start_ip: Ipv4Addr, end_ip
     Err(Error::NoWireGuardAddressAvailable)
 }
 
-fn add_machine(connection: &PgConnection, hostname: &str, wireguard_ip: Option<Ipv4Addr>, wireguard_pubkey: &Option<String>) -> Result<()> {
-    println!("{}", hostname);
+fn env_var(var: &str) -> Result<String> {
+    env::var(var).context(Var { var })
+}
 
-    let start_ip = env::var("WIREGUARD_IP_START").context(Var)?.parse::<Ipv4Addr>().context(AddrParse)?;
-    let end_ip = env::var("WIREGUARD_IP_END").context(Var)?.parse::<Ipv4Addr>().context(AddrParse)?;
-    let path_template = env::var("WIREGUARD_PRIVATE_KEY_PATH_TEMPLATE").context(Var)?;
+fn add_machine(
+    connection: &PgConnection,
+    hostname: &str,
+    owner: Option<String>,
+    ssh_port: Option<u16>,
+    ssh_user: Option<String>,
+    wireguard_ip: Option<Ipv4Addr>,
+    wireguard_pubkey: &Option<String>
+) -> Result<()> {
+    let default_ssh_port = env_var("DEFAULT_SSH_PORT")?.parse::<u16>().context(ParseInt)?;
+    let default_ssh_user = env_var("DEFAULT_SSH_USER")?;
+    let start_ip         = env_var("WIREGUARD_IP_START")?.parse::<Ipv4Addr>().context(AddrParse)?;
+    let end_ip           = env_var("WIREGUARD_IP_END")?.parse::<Ipv4Addr>().context(AddrParse)?;
+    let path_template    = env_var("WIREGUARD_PRIVATE_KEY_PATH_TEMPLATE")?;
+    let owner = match owner {
+        Some(owner) => owner,
+        None => {
+            env_var("DEFAULT_OWNER")?
+        }
+    };
+
+    let ssh_port = ssh_port.unwrap_or(default_ssh_port);
+    let ssh_user = ssh_user.unwrap_or(default_ssh_user);
     let wireguard_ip = match wireguard_ip {
         Some(ip) => IpNetwork::new(IpAddr::V4(ip), 32).unwrap(),
         None => get_unused_wireguard_ip(&connection, start_ip, end_ip)?,
@@ -275,6 +298,22 @@ enum Opt {
         #[structopt(name = "HOSTNAME")]
         hostname: String,
 
+        /// Machine owner
+        #[structopt(long)]
+        owner: Option<String>,
+
+        /// SSH port
+        ///
+        /// If one is not provided, DEFAULT_SSH_PORT will be used from the environment.
+        #[structopt(long)]
+        ssh_port: Option<u16>,
+
+        /// SSH user
+        ///
+        /// If one is not provided, DEFAULT_SSH_USER will be used from the environment.
+        #[structopt(long)]
+        ssh_user: Option<String>,
+
         /// WireGuard IP
         ///
         /// If one is not provided, an unused IP address will be selected.
@@ -307,8 +346,8 @@ fn run() -> Result<()> {
         Opt::List => {
             list_machines(&connection)?;
         },
-        Opt::Add { hostname, wireguard_ip, wireguard_pubkey } => {
-            add_machine(&connection, &hostname, wireguard_ip, &wireguard_pubkey)?;
+        Opt::Add { hostname, owner, ssh_port, ssh_user, wireguard_ip, wireguard_pubkey } => {
+            add_machine(&connection, &hostname, owner, ssh_port, ssh_user, wireguard_ip, &wireguard_pubkey)?;
         },
         Opt::SshConfig { r#for } => {
             print_ssh_config(&connection, &r#for)?;
