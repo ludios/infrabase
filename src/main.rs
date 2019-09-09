@@ -36,8 +36,8 @@ use models::{Machine, NewMachine, MachineAddress, NetworkLink, Provider};
 pub(crate) enum Error {
     #[snafu(display("Unable to read configuration from {}: {}", path.display(), source))]
     ReadConfiguration { source: dotenv::DotenvError, path: PathBuf },
-    #[snafu(display("Could not find source machine {:?} in database", source_machine))]
-    MissingSourceMachine { source_machine: String },
+    #[snafu(display("Could not find machine {:?} in database", hostname))]
+    NoSuchMachine { hostname: String },
     Diesel { source: diesel::result::Error },
     DieselConnection { source: diesel::ConnectionError },
     #[snafu(display("Could not get variable {} from environment", var))]
@@ -294,6 +294,15 @@ fn add_machine(
     Ok(())
 }
 
+fn remove_machine(connection: &PgConnection, hostname: &str) -> Result<()> {
+    let num_deleted = diesel::delete(machines::table.filter(machines::hostname.eq(hostname)))
+        .execute(connection)?;
+    if num_deleted != 1 {
+        return Err(Error::NoSuchMachine { hostname: hostname.into() });
+    }
+    Ok(())
+}
+
 fn print_ssh_config(connection: &PgConnection, for_machine: &str) -> Result<()> {
     let (data, network_links_map) = connection.transaction::<_, Error, _>(|| {
         let data = get_machines_and_addresses(&connection)?;
@@ -302,7 +311,7 @@ fn print_ssh_config(connection: &PgConnection, for_machine: &str) -> Result<()> 
     })?;
     let source_machine = data.iter().find(|(machine, _)| machine.hostname == for_machine);
     let source_networks = match source_machine {
-        None => return Err(Error::MissingSourceMachine { source_machine: for_machine.into() }),
+        None => return Err(Error::NoSuchMachine { hostname: for_machine.into() }),
         Some((_, addresses)) => {
             addresses.iter().map(|a| a.network.clone()).collect::<Vec<_>>()
         }
@@ -399,6 +408,14 @@ enum InfrabaseCommand {
         provider: Option<u32>,
     },
 
+    #[structopt(name = "rm")]
+    /// Remove machine
+    Remove {
+        /// Machine hostname
+        #[structopt(name = "HOSTNAME")]
+        hostname: String,
+    },
+
     #[structopt(name = "ssh_config")]
     /// Prints an ~/.ssh/config that lists all machines
     SshConfig {
@@ -430,6 +447,9 @@ fn run() -> Result<()> {
         },
         InfrabaseCommand::Add { hostname, owner, ssh_port, ssh_user, wireguard_ip, wireguard_pubkey, provider } => {
             add_machine(&connection, &hostname, owner, ssh_port, ssh_user, wireguard_ip, &wireguard_pubkey, provider)?;
+        },
+        InfrabaseCommand::Remove { hostname } => {
+            remove_machine(&connection, &hostname)?;
         },
         InfrabaseCommand::SshConfig { r#for } => {
             print_ssh_config(&connection, &r#for)?;
