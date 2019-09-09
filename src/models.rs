@@ -1,6 +1,6 @@
 use ipnetwork::IpNetwork;
 use chrono::{DateTime, Utc};
-use crate::schema::{machines, machine_addresses, networks};
+use crate::schema::{machines, machine_addresses, networks, providers};
 
 #[derive(Identifiable, Queryable, Debug)]
 #[primary_key(hostname)]
@@ -42,4 +42,12 @@ pub struct NetworkLink {
     pub name: String,
     pub other_network: String,
     pub priority: i32,
+}
+
+#[derive(Identifiable, Queryable, Debug)]
+#[table_name = "providers"]
+pub struct Provider {
+    pub id: i32,
+    pub name: String,
+    pub email: String,
 }

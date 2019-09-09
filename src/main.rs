@@ -26,8 +26,8 @@ use indoc::indoc;
 use natural_sort::HumanStr;
 use ipnetwork::IpNetwork;
 
-use schema::{machines, network_links};
-use models::{Machine, MachineAddress, NetworkLink};
+use schema::{machines, network_links, providers};
+use models::{Machine, MachineAddress, NetworkLink, Provider};
 
 #[derive(Debug, Snafu)]
 pub(crate) enum Error {
@@ -119,6 +119,28 @@ fn format_provider(provider: Option<i32>) -> String {
     }
 }
 
+fn print_tabwriter(tw: TabWriter<Vec<u8>>) -> Result<()> {
+    let bytes = tw.into_inner().context(IntoInner)?;
+    std::io::stdout().write_all(&bytes).context(Io)
+}
+
+fn list_providers(connection: &PgConnection) -> Result<()> {
+    let providers = providers::table
+        .load::<Provider>(connection)?;
+
+    let mut tw = TabWriter::new(vec![]);
+    writeln!(tw, "ID\tNAME\tEMAIL").context(Io)?;
+    writeln!(tw, "--\t----\t-----").context(Io)?;
+    for provider in &providers {
+        writeln!(tw, "{}\t{}\t{}",
+                 provider.id,
+                 provider.name,
+                 provider.email
+        ).context(Io)?;
+    }
+    print_tabwriter(tw)
+}
+
 fn list_machines(connection: &PgConnection) -> Result<()> {
     let mut data = get_machines_and_addresses(&connection)?;
 
@@ -141,11 +163,7 @@ fn list_machines(connection: &PgConnection) -> Result<()> {
                  format_provider(machine.provider_id)
         ).context(Io)?;
     }
-
-    let bytes = tw.into_inner().context(IntoInner)?;
-    std::io::stdout().write_all(&bytes).context(Io)?;
-
-    Ok(())
+    print_tabwriter(tw)
 }
 
 fn get_existing_wireguard_ips(connection: &PgConnection) -> Result<impl Iterator<Item=IpNetwork>> {
@@ -287,10 +305,15 @@ fn print_ssh_config(connection: &PgConnection, for_machine: &str) -> Result<()> 
 #[derive(StructOpt, Debug)]
 #[structopt(name = "infrabase")]
 /// the machine inventory system
-enum Opt {
+enum InfrabaseCommand {
+    /// Subcommands to work with providers
+    #[structopt(name = "providers")]
+    Providers(ProvidersCommand),
+
     #[structopt(name = "ls")]
     /// List machines
     List,
+
     #[structopt(name = "add")]
     /// Add machine
     Add {
@@ -327,6 +350,7 @@ enum Opt {
         #[structopt(long)]
         wireguard_pubkey: Option<String>,
     },
+
     #[structopt(name = "ssh_config")]
     /// Prints an ~/.ssh/config that lists all machines
     SshConfig {
@@ -336,20 +360,30 @@ enum Opt {
     },
 }
 
+#[derive(StructOpt, Debug)]
+enum ProvidersCommand {
+    #[structopt(name = "ls")]
+    /// List providers
+    List
+}
+
 fn run() -> Result<()> {
     import_env()?;
     env_logger::init();
     let connection = establish_connection()?;
 
-    let matches = Opt::from_args();
+    let matches = InfrabaseCommand::from_args();
     match matches {
-        Opt::List => {
+        InfrabaseCommand::Providers(ProvidersCommand::List) => {
+            list_providers(&connection)?;
+        },
+        InfrabaseCommand::List => {
             list_machines(&connection)?;
         },
-        Opt::Add { hostname, owner, ssh_port, ssh_user, wireguard_ip, wireguard_pubkey } => {
+        InfrabaseCommand::Add { hostname, owner, ssh_port, ssh_user, wireguard_ip, wireguard_pubkey } => {
             add_machine(&connection, &hostname, owner, ssh_port, ssh_user, wireguard_ip, &wireguard_pubkey)?;
         },
-        Opt::SshConfig { r#for } => {
+        InfrabaseCommand::SshConfig { r#for } => {
             print_ssh_config(&connection, &r#for)?;
         },
     }
