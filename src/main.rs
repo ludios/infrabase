@@ -215,10 +215,10 @@ fn env_var(var: &str) -> Result<String> {
 }
 
 macro_rules! unwrap_or_else {
-    ($opt:expr, $else_:expr) => {
+    ($opt:expr, $else:expr) => {
         match $opt {
             Some(x) => x,
-            None => $else_
+            None => $else
         }
     };
 }
