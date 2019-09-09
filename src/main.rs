@@ -4,6 +4,7 @@
 pub mod schema;
 pub mod models;
 mod wireguard;
+#[macro_use] mod macros;
 
 #[macro_use] extern crate diesel;
 #[macro_use] extern crate itertools;
@@ -212,24 +213,6 @@ fn get_unused_wireguard_ip(connection: &PgConnection, start_ip: Ipv4Addr, end_ip
 
 fn env_var(var: &str) -> Result<String> {
     env::var(var).context(Var { var })
-}
-
-macro_rules! unwrap_or_else {
-    ($opt:expr, $else:expr) => {
-        match $opt {
-            Some(x) => x,
-            None => $else
-        }
-    };
-}
-
-macro_rules! ok_or_else {
-    ($opt:expr, $else:expr) => {
-        match $opt {
-            Some(x) => Some(x),
-            None => $else
-        }
-    };
 }
 
 #[allow(clippy::too_many_arguments)]
