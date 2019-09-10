@@ -143,8 +143,7 @@ fn list_providers(connection: &PgConnection) -> Result<()> {
         .load::<Provider>(connection)?;
 
     let mut tw = TabWriter::new(vec![]);
-    writeln!(tw, "ID\tNAME\tEMAIL").context(Io)?;
-    writeln!(tw, "--\t----\t-----").context(Io)?;
+    write_header(&mut tw, vec!["ID", "NAME", "EMAIL"])?;
     for provider in &providers {
         writeln!(tw, "{}\t{}\t{}",
                  provider.id,
@@ -153,6 +152,15 @@ fn list_providers(connection: &PgConnection) -> Result<()> {
         ).context(Io)?;
     }
     print_tabwriter(tw)
+}
+
+/// Write a table header to a TabWriter
+fn write_header(tw: &mut TabWriter<Vec<u8>>, headers: Vec<&str>) -> Result<()> {
+    tw.write_all(headers.join("\t").as_bytes()).context(Io)?;
+    tw.write_all("\n".as_bytes()).context(Io)?;
+    tw.write_all(headers.iter().map(|h| str::repeat("-", h.len())).join("\t").as_bytes()).context(Io)?;
+    tw.write_all("\n".as_bytes()).context(Io)?;
+    Ok(())
 }
 
 fn list_addresses(connection: &PgConnection) -> Result<()> {
@@ -168,8 +176,7 @@ fn list_addresses(connection: &PgConnection) -> Result<()> {
     });
 
     let mut tw = TabWriter::new(vec![]);
-    writeln!(tw, "HOSTNAME\tNETWORK\tADDRESS\tSSH\tWIREGUARD").context(Io)?;
-    writeln!(tw, "--------\t-------\t-------\t---\t---------").context(Io)?;
+    write_header(&mut tw, vec!["HOSTNAME", "NETWORK", "ADDRESS", "SSH", "WG"])?;
     for address in &addresses {
         writeln!(tw, "{}\t{}\t{}\t{}\t{}",
                  address.hostname,
@@ -198,8 +205,7 @@ fn list_machines(connection: &PgConnection) -> Result<()> {
     });
 
     let mut tw = TabWriter::new(vec![]);
-    writeln!(tw, "HOSTNAME\tWIREGUARD\tOWNER\tPROV\tADDRESSES").context(Io)?;
-    writeln!(tw, "--------\t---------\t-----\t----\t---------").context(Io)?;
+    write_header(&mut tw, vec!["HOSTNAME", "WIREGUARD", "OWNER", "PROV", "ADDRESSES"])?;
     for (machine, addresses) in &data {
         writeln!(tw, "{}\t{}\t{}\t{}\t{}",
                  machine.hostname,
