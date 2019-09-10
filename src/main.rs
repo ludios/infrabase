@@ -29,8 +29,9 @@ use structopt::StructOpt;
 use indoc::indoc;
 use natural_sort::HumanStr;
 use ipnetwork::IpNetwork;
+use itertools::Itertools;
 
-use schema::{machines, network_links, providers};
+use schema::{machines, machine_addresses, network_links, providers};
 use models::{Machine, NewMachine, MachineAddress, NetworkLink, Provider};
 
 #[derive(Debug, Snafu)]
@@ -111,6 +112,13 @@ fn get_machines_and_addresses(connection: &PgConnection) -> DieselResult<Vec<(Ma
     })
 }
 
+fn format_port(port: Option<i32>) -> String {
+    match port {
+        Some(port) => port.to_string(),
+        None => "-".to_string(),
+    }
+}
+
 fn format_wireguard_ip(wireguard_ip: &Option<IpNetwork>) -> String {
     match wireguard_ip {
         Some(ipnetwork) => ipnetwork.ip().to_string(),
@@ -147,6 +155,37 @@ fn list_providers(connection: &PgConnection) -> Result<()> {
     print_tabwriter(tw)
 }
 
+fn list_addresses(connection: &PgConnection) -> Result<()> {
+    let mut addresses = machine_addresses::table
+        .load::<MachineAddress>(connection)?;
+
+    // natural_sort refuses to compare string segments with integer segments,
+    // so if returns None, fall back to String cmp.
+    addresses.sort_unstable_by(|a1, a2| {
+        HumanStr::new(&a1.hostname)
+            .partial_cmp(&HumanStr::new(&a2.hostname))
+            .unwrap_or_else(|| a1.hostname.cmp(&a2.hostname))
+    });
+
+    let mut tw = TabWriter::new(vec![]);
+    writeln!(tw, "HOSTNAME\tNETWORK\tADDRESS\tSSH\tWIREGUARD").context(Io)?;
+    writeln!(tw, "--------\t-------\t-------\t---\t---------").context(Io)?;
+    for address in &addresses {
+        writeln!(tw, "{}\t{}\t{}\t{}\t{}",
+                 address.hostname,
+                 address.network,
+                 address.address,
+                 format_port(address.ssh_port),
+                 format_port(address.wireguard_port),
+        ).context(Io)?;
+    }
+    print_tabwriter(tw)
+}
+
+fn format_address(address: &MachineAddress) -> String {
+    format!("{}={}", address.network, address.address.ip())
+}
+
 fn list_machines(connection: &PgConnection) -> Result<()> {
     let mut data = get_machines_and_addresses(&connection)?;
 
@@ -159,14 +198,15 @@ fn list_machines(connection: &PgConnection) -> Result<()> {
     });
 
     let mut tw = TabWriter::new(vec![]);
-    writeln!(tw, "HOSTNAME\tWIREGUARD\tOWNER\tPROVIDER").context(Io)?;
-    writeln!(tw, "--------\t---------\t-----\t--------").context(Io)?;
-    for (machine, _addresses) in &data {
-        writeln!(tw, "{}\t{}\t{}\t{}",
+    writeln!(tw, "HOSTNAME\tWIREGUARD\tOWNER\tPROV\tADDRESSES").context(Io)?;
+    writeln!(tw, "--------\t---------\t-----\t----\t---------").context(Io)?;
+    for (machine, addresses) in &data {
+        writeln!(tw, "{}\t{}\t{}\t{}\t{}",
                  machine.hostname,
                  format_wireguard_ip(&machine.wireguard_ip),
                  machine.owner,
-                 format_provider(machine.provider_id)
+                 format_provider(machine.provider_id),
+                 addresses.iter().map(format_address).join(" ")
         ).context(Io)?;
     }
     print_tabwriter(tw)
@@ -337,8 +377,12 @@ fn print_ssh_config(connection: &PgConnection, for_machine: &str) -> Result<()> 
 /// the machine inventory system
 enum InfrabaseCommand {
     /// Subcommands to work with providers
-    #[structopt(name = "providers")]
-    Providers(ProvidersCommand),
+    #[structopt(name = "provider")]
+    Provider(ProviderCommand),
+
+    /// Subcommands to work with addresses
+    #[structopt(name = "address")]
+    Address(AddressCommand),
 
     #[structopt(name = "ls")]
     /// List machines
@@ -409,9 +453,16 @@ enum InfrabaseCommand {
 }
 
 #[derive(StructOpt, Debug)]
-enum ProvidersCommand {
+enum ProviderCommand {
     #[structopt(name = "ls")]
     /// List providers
+    List
+}
+
+#[derive(StructOpt, Debug)]
+enum AddressCommand {
+    #[structopt(name = "ls")]
+    /// List addresses
     List
 }
 
@@ -422,8 +473,11 @@ fn run() -> Result<()> {
 
     let matches = InfrabaseCommand::from_args();
     match matches {
-        InfrabaseCommand::Providers(ProvidersCommand::List) => {
+        InfrabaseCommand::Provider(ProviderCommand::List) => {
             list_providers(&connection)?;
+        },
+        InfrabaseCommand::Address(AddressCommand::List) => {
+            list_addresses(&connection)?;
         },
         InfrabaseCommand::List => {
             list_machines(&connection)?;
