@@ -163,6 +163,20 @@ fn write_column_names(tw: &mut TabWriter<Vec<u8>>, headers: Vec<&str>) -> Result
     Ok(())
 }
 
+fn add_address(
+    connection: &PgConnection,
+    hostname: &str,
+    network: &str, address: Ipv4Addr,
+    ssh_port: Option<u16>,
+    wireguard_port: Option<u16>
+) -> Result<()> {
+    Ok(())
+}
+
+fn remove_address(connection: &PgConnection, hostname: &str, network: &str, address: Ipv4Addr) -> Result<()> {
+    Ok(())
+}
+
 fn list_addresses(connection: &PgConnection) -> Result<()> {
     let mut addresses = machine_addresses::table
         .load::<MachineAddress>(connection)?;
@@ -462,14 +476,58 @@ enum InfrabaseCommand {
 enum ProviderCommand {
     #[structopt(name = "ls")]
     /// List providers
-    List
+    List,
 }
 
 #[derive(StructOpt, Debug)]
 enum AddressCommand {
     #[structopt(name = "ls")]
     /// List addresses
-    List
+    List,
+
+    #[structopt(name = "add")]
+    /// Add address
+    Add {
+        /// Machine hostname
+        #[structopt(name = "HOSTNAME")]
+        hostname: String,
+
+        /// The network for this address
+        #[structopt(name = "NETWORK")]
+        network: String,
+
+        /// The address
+        #[structopt(name = "ADDRESS")]
+        address: Ipv4Addr,
+
+        /// SSH port
+        ///
+        /// If one is not provided, DEFAULT_SSH_PORT will be used from the environment.
+        #[structopt(long)]
+        ssh_port: Option<u16>,
+
+        /// SSH port
+        ///
+        /// If one is not provided, DEFAULT_WIREGUARD_PORT will be used from the environment.
+        #[structopt(long)]
+        wireguard_port: Option<u16>,
+    },
+
+    #[structopt(name = "rm")]
+    /// Remove address
+    Remove {
+        /// Machine hostname
+        #[structopt(name = "HOSTNAME")]
+        hostname: String,
+
+        /// The network
+        #[structopt(name = "NETWORK")]
+        network: String,
+
+        /// The address
+        #[structopt(name = "ADDRESS")]
+        address: Ipv4Addr,
+    }
 }
 
 fn run() -> Result<()> {
@@ -479,11 +537,21 @@ fn run() -> Result<()> {
 
     let matches = InfrabaseCommand::from_args();
     match matches {
-        InfrabaseCommand::Provider(ProviderCommand::List) => {
-            list_providers(&connection)?;
+        InfrabaseCommand::Provider(cmd) => {
+            match cmd {
+                ProviderCommand::List => list_providers(&connection)?,
+            }
         },
-        InfrabaseCommand::Address(AddressCommand::List) => {
-            list_addresses(&connection)?;
+        InfrabaseCommand::Address(cmd) => {
+            match cmd {
+                AddressCommand::List => list_addresses(&connection)?,
+                AddressCommand::Add { hostname, network, address, ssh_port, wireguard_port } => {
+                    add_address(&connection, &hostname, &network, address, ssh_port, wireguard_port)?
+                },
+                AddressCommand::Remove { hostname, network, address } => {
+                    remove_address(&connection, &hostname, &network, address)?
+                },
+            }
         },
         InfrabaseCommand::List => {
             list_machines(&connection)?;
