@@ -28,7 +28,7 @@ pub struct NewMachine {
     pub provider_id: Option<i32>,
 }
 
-#[derive(Identifiable, Queryable, Associations, Debug)]
+#[derive(Identifiable, Insertable, Queryable, Associations, Debug)]
 #[primary_key(hostname, network, address)]
 #[belongs_to(Machine, foreign_key = "hostname")]
 #[table_name = "machine_addresses"]

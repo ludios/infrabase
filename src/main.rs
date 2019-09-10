@@ -166,10 +166,26 @@ fn write_column_names(tw: &mut TabWriter<Vec<u8>>, headers: Vec<&str>) -> Result
 fn add_address(
     connection: &PgConnection,
     hostname: &str,
-    network: &str, address: Ipv4Addr,
+    network: &str,
+    address: Ipv4Addr,
     ssh_port: Option<u16>,
     wireguard_port: Option<u16>
 ) -> Result<()> {
+    let ssh_port = unwrap_or_else!(ssh_port, env_var("DEFAULT_SSH_PORT")?.parse::<u16>().context(ParseInt { var: "DEFAULT_SSH_PORT" })?);
+    let wireguard_port = unwrap_or_else!(wireguard_port, env_var("DEFAULT_WIREGUARD_PORT")?.parse::<u16>().context(ParseInt { var: "DEFAULT_WIREGUARD_PORT" })?);
+    let ipnetwork = IpNetwork::new(IpAddr::V4(address), 32).unwrap();
+    let new_address = MachineAddress {
+        hostname: hostname.into(),
+        network: network.into(),
+        address: ipnetwork,
+        ssh_port: Some(i32::from(ssh_port)),
+        wireguard_port: Some(i32::from(wireguard_port)),
+    };
+
+    diesel::insert_into(machine_addresses::table)
+        .values(&new_address)
+        .execute(connection)?;
+
     Ok(())
 }
 
