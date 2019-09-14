@@ -40,6 +40,8 @@ pub(crate) enum Error {
     ReadConfiguration { source: dotenv::DotenvError, path: PathBuf },
     #[snafu(display("Could not find machine {:?} in database", hostname))]
     NoSuchMachine { hostname: String },
+    #[snafu(display("Could not find address ({:?}, {:?}, {:?}) in database", hostname, network, address))]
+    NoSuchAddress { hostname: String, network: String, address: IpNetwork },
     Diesel { source: diesel::result::Error },
     DieselConnection { source: diesel::ConnectionError },
     #[snafu(display("Could not get variable {} from environment", var))]
@@ -190,6 +192,16 @@ fn add_address(
 }
 
 fn remove_address(connection: &PgConnection, hostname: &str, network: &str, address: Ipv4Addr) -> Result<()> {
+    let ipnetwork = IpNetwork::new(IpAddr::V4(address), 32).unwrap();
+    let num_deleted = diesel::delete(
+        machine_addresses::table
+            .filter(machine_addresses::hostname.eq(hostname))
+            .filter(machine_addresses::network.eq(network))
+            .filter(machine_addresses::address.eq(ipnetwork))
+    ).execute(connection)?;
+    if num_deleted != 1 {
+        return Err(Error::NoSuchAddress { hostname: hostname.into(), network: network.into(), address: ipnetwork });
+    }
     Ok(())
 }
 
