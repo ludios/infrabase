@@ -18,7 +18,10 @@ log = "0.4.7"
 env_logger = "0.6.2"
 indoc = { version = "0.3.3", features = ["unstable"] }
 itertools = "0.8.0"
+# Upstream stopped development
 natural_sort = { git = "https://github.com/ludios/natural-sort-rs" }
 tabwriter = "1.1.0"
-runtime-fmt = "0.4.0"
+# https://github.com/SpaceManiac/runtime-fmt/issues/10
+runtime-fmt = { git = "https://github.com/ludios/runtime-fmt" }
 bstr = "0.2.8"
+termcolor = "1.0.5"
