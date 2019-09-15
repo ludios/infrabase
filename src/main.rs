@@ -281,19 +281,19 @@ fn nix_data(connection: &PgConnection) -> Result<()> {
 
     println!("{{");
 
+    let mut tw = TabWriter::new(vec![]).padding(1);
     for (machine, addresses) in &data {
-        println!("  {} = {{ owner = \"{}\"; wireguard_ip = \"{}\"; wireguard_pubkey = \"{}\"; provider_id = {}; }};",
+        writeln!(tw, "  {}\t= {{ owner = \"{}\";\twireguard_ip = \"{}\";\twireguard_pubkey = \"{}\";\tprovider_id = {};\t}};",
                  machine.hostname,
                  machine.owner,
                  format_wireguard_ip(&machine.wireguard_ip),
                  format_nix_maybe_null(&machine.wireguard_pubkey),
                  format_nix_maybe_null(&machine.provider_id),
                  //addresses.iter().map(format_address).join(" ")
-        );
+        ).context(Io)?;
     }
-
+    print_tabwriter(tw)?;
     println!("}}");
-
     Ok(())
 }
 
