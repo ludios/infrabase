@@ -4,6 +4,7 @@
 pub mod schema;
 pub mod models;
 mod wireguard;
+mod nix;
 #[macro_use] mod macros;
 
 #[macro_use] extern crate diesel;
@@ -32,6 +33,7 @@ use natural_sort::HumanStr;
 use ipnetwork::IpNetwork;
 use itertools::Itertools;
 
+use nix::ToNix;
 use schema::{machines, machine_addresses, network_links, providers};
 use models::{Machine, NewMachine, MachineAddress, NetworkLink, Provider};
 
@@ -261,13 +263,6 @@ fn list_machines(connection: &PgConnection) -> Result<()> {
     print_tabwriter(tw)
 }
 
-fn format_nix_maybe_null<T: ToString>(opt: &Option<T>) -> String {
-    match opt {
-        Some(val) => val.to_string(),
-        None => "null".to_string()
-    }
-}
-
 fn nix_data(connection: &PgConnection) -> Result<()> {
     let mut data = get_machines_and_addresses(&connection)?;
 
@@ -283,12 +278,12 @@ fn nix_data(connection: &PgConnection) -> Result<()> {
 
     let mut tw = TabWriter::new(vec![]).padding(1);
     for (machine, addresses) in &data {
-        writeln!(tw, "  {}\t= {{ owner = \"{}\";\twireguard_ip = \"{}\";\twireguard_pubkey = \"{}\";\tprovider_id = {};\t}};",
+        writeln!(tw, "  {}\t= {{ owner = {};\twireguard_ip = {};\twireguard_pubkey = {};\tprovider_id = {};\t}};",
                  machine.hostname,
-                 machine.owner,
-                 format_wireguard_ip(&machine.wireguard_ip),
-                 format_nix_maybe_null(&machine.wireguard_pubkey),
-                 format_nix_maybe_null(&machine.provider_id),
+                 machine.owner.to_nix(),
+                 format_wireguard_ip(&machine.wireguard_ip).to_nix(),
+                 machine.wireguard_pubkey.to_nix(),
+                 &machine.provider_id.to_nix(),
                  //addresses.iter().map(format_address).join(" ")
         ).context(Io)?;
     }
