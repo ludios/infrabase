@@ -264,7 +264,12 @@ fn list_machines(connection: &PgConnection) -> Result<()> {
 }
 
 fn format_nix_address(address: &MachineAddress) -> String {
-    format!("{} = {}; ", address.network, address.address.ip().to_nix())
+    format!("{} = {{ ip = {}; ssh_port = {}; wireguard_port = {}; }}; ",
+            address.network,
+            address.address.ip().to_nix(),
+            address.ssh_port.to_nix(),
+            address.wireguard_port.to_nix()
+    )
 }
 
 fn nix_data(connection: &PgConnection) -> Result<()> {
@@ -282,7 +287,7 @@ fn nix_data(connection: &PgConnection) -> Result<()> {
 
     let mut tw = TabWriter::new(vec![]).padding(1);
     for (machine, addresses) in &data {
-        writeln!(tw, "  {}\t= {{ owner = {};\twireguard_ip = {};\twireguard_pubkey = {};\tprovider_id = {};\taddresses = {{ {}}}\t}};",
+        writeln!(tw, "  {}\t= {{ owner = {};\twireguard_ip = {};\twireguard_pubkey = {};\tprovider_id = {};\taddresses = {{ {}}} }};",
                  machine.hostname,
                  machine.owner.to_nix(),
                  format_wireguard_ip(&machine.wireguard_ip).to_nix(),
