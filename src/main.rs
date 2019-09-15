@@ -283,7 +283,7 @@ fn nix_data(connection: &PgConnection) -> Result<()> {
     println!("{{");
     let mut tw = TabWriter::new(vec![]).padding(1);
     for (machine, addresses) in &data {
-        writeln!(tw, "  {}\t= {{ owner = {};\twireguard_ip = {};\twireguard_pubkey = {};\tprovider_id = {};\taddresses = {{ {}}} }};",
+        writeln!(tw, "  {}\t= {{ owner = {};\twireguard_ip = {};\twireguard_pubkey = {};\tprovider_id = {};\taddresses = {{ {}}}; }};",
                  machine.hostname,
                  machine.owner.to_nix(),
                  format_wireguard_ip(&machine.wireguard_ip).to_nix(),
