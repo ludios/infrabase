@@ -104,7 +104,9 @@ fn get_network_links_map(connection: &PgConnection) -> DieselResult<NetworkLinks
     Ok(map)
 }
 
-fn get_machines_and_addresses(connection: &PgConnection) -> DieselResult<Vec<(Machine, Vec<MachineAddress>)>> {
+type MachinesAndAddresses = Vec<(Machine, Vec<MachineAddress>)>;
+
+fn get_machines_and_addresses(connection: &PgConnection) -> DieselResult<MachinesAndAddresses> {
     connection.transaction::<_, _, _>(|| {
         let machines = machines::table
             .load::<Machine>(connection)?;
@@ -238,9 +240,7 @@ fn format_address(address: &MachineAddress) -> String {
     format!("{}={}", address.network, address.address.ip())
 }
 
-fn list_machines(connection: &PgConnection) -> Result<()> {
-    let mut data = get_machines_and_addresses(&connection)?;
-
+fn sort_machines_and_addresses(data: &mut MachinesAndAddresses) {
     // natural_sort refuses to compare string segments with integer segments,
     // so if returns None, fall back to String cmp.
     data.sort_unstable_by(|(m1, _), (m2, _)| {
@@ -248,7 +248,11 @@ fn list_machines(connection: &PgConnection) -> Result<()> {
             .partial_cmp(&HumanStr::new(&m2.hostname))
             .unwrap_or_else(|| m1.hostname.cmp(&m2.hostname))
     });
+}
 
+fn list_machines(connection: &PgConnection) -> Result<()> {
+    let mut data = get_machines_and_addresses(&connection)?;
+    sort_machines_and_addresses(&mut data);
     let mut tw = TabWriter::new(vec![]);
     write_column_names(&mut tw, vec!["HOSTNAME", "WIREGUARD", "OWNER", "PROV", "ADDRESSES"])?;
     for (machine, addresses) in &data {
@@ -274,17 +278,9 @@ fn format_nix_address(address: &MachineAddress) -> String {
 
 fn nix_data(connection: &PgConnection) -> Result<()> {
     let mut data = get_machines_and_addresses(&connection)?;
-
-    // natural_sort refuses to compare string segments with integer segments,
-    // so if returns None, fall back to String cmp.
-    data.sort_unstable_by(|(m1, _), (m2, _)| {
-        HumanStr::new(&m1.hostname)
-            .partial_cmp(&HumanStr::new(&m2.hostname))
-            .unwrap_or_else(|| m1.hostname.cmp(&m2.hostname))
-    });
+    sort_machines_and_addresses(&mut data);
 
     println!("{{");
-
     let mut tw = TabWriter::new(vec![]).padding(1);
     for (machine, addresses) in &data {
         writeln!(tw, "  {}\t= {{ owner = {};\twireguard_ip = {};\twireguard_pubkey = {};\tprovider_id = {};\taddresses = {{ {}}} }};",
