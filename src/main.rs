@@ -19,6 +19,7 @@ use std::io::Write;
 use std::path::Path;
 use std::fs;
 use std::str;
+use std::string::ToString;
 use std::convert::TryFrom;
 use tabwriter::{TabWriter, IntoInnerError};
 use diesel::prelude::*;
@@ -260,6 +261,42 @@ fn list_machines(connection: &PgConnection) -> Result<()> {
     print_tabwriter(tw)
 }
 
+fn format_nix_maybe_null<T: ToString>(opt: &Option<T>) -> String {
+    match opt {
+        Some(val) => val.to_string(),
+        None => "null".to_string()
+    }
+}
+
+fn nix_data(connection: &PgConnection) -> Result<()> {
+    let mut data = get_machines_and_addresses(&connection)?;
+
+    // natural_sort refuses to compare string segments with integer segments,
+    // so if returns None, fall back to String cmp.
+    data.sort_unstable_by(|(m1, _), (m2, _)| {
+        HumanStr::new(&m1.hostname)
+            .partial_cmp(&HumanStr::new(&m2.hostname))
+            .unwrap_or_else(|| m1.hostname.cmp(&m2.hostname))
+    });
+
+    println!("{{");
+
+    for (machine, addresses) in &data {
+        println!("  {} = {{ owner = \"{}\"; wireguard_ip = \"{}\"; wireguard_pubkey = \"{}\"; provider_id = {}; }};",
+                 machine.hostname,
+                 machine.owner,
+                 format_wireguard_ip(&machine.wireguard_ip),
+                 format_nix_maybe_null(&machine.wireguard_pubkey),
+                 format_nix_maybe_null(&machine.provider_id),
+                 //addresses.iter().map(format_address).join(" ")
+        );
+    }
+
+    println!("}}");
+
+    Ok(())
+}
+
 fn get_existing_wireguard_ips(connection: &PgConnection) -> Result<impl Iterator<Item=IpNetwork>> {
     Ok(machines::table
         .load::<Machine>(connection)?
@@ -436,6 +473,10 @@ enum InfrabaseCommand {
     /// List machines
     List,
 
+    #[structopt(name = "nix-data")]
+    /// Output machine and address data in Nix format for use in configuration
+    NixData,
+
     #[structopt(name = "add")]
     /// Add machine
     Add {
@@ -583,6 +624,9 @@ fn run() -> Result<()> {
         },
         InfrabaseCommand::List => {
             list_machines(&connection)?;
+        },
+        InfrabaseCommand::NixData => {
+            nix_data(&connection)?;
         },
         InfrabaseCommand::Add { hostname, owner, ssh_port, ssh_user, wireguard_ip, wireguard_pubkey, provider } => {
             add_machine(&connection, &hostname, owner, ssh_port, ssh_user, wireguard_ip, &wireguard_pubkey, provider)?;
