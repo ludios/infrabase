@@ -9,7 +9,6 @@ mod nix;
 
 #[macro_use] extern crate diesel;
 #[macro_use] extern crate itertools;
-#[macro_use] extern crate runtime_fmt;
 
 use std::io;
 use std::iter;
@@ -17,8 +16,6 @@ use std::collections::{HashMap, HashSet};
 use std::{env, path::PathBuf};
 use std::net::{IpAddr, Ipv4Addr};
 use std::io::Write;
-use std::path::Path;
-use std::fs;
 use std::str;
 use std::string::ToString;
 use std::convert::TryFrom;
@@ -346,18 +343,18 @@ fn add_machine(
     ssh_port: Option<u16>,
     ssh_user: Option<String>,
     wireguard_ip: Option<Ipv4Addr>,
-    wireguard_pubkey: &Option<String>,
+    wireguard_port: Option<u16>,
     provider: Option<u32>,
 ) -> Result<()> {
     // Required environmental variables
-    let start_ip      = env_var("WIREGUARD_IP_START")?.parse::<Ipv4Addr>().context(AddrParse { var: "WIREGUARD_IP_START" })?;
-    let end_ip        = env_var("WIREGUARD_IP_END")?.parse::<Ipv4Addr>().context(AddrParse { var: "WIREGUARD_IP_END" })?;
-    let path_template = env_var("WIREGUARD_PRIVATE_KEY_PATH_TEMPLATE")?;
+    let start_ip       = env_var("WIREGUARD_IP_START")?.parse::<Ipv4Addr>().context(AddrParse { var: "WIREGUARD_IP_START" })?;
+    let end_ip         = env_var("WIREGUARD_IP_END")?.parse::<Ipv4Addr>().context(AddrParse { var: "WIREGUARD_IP_END" })?;
     // Optional environmntal variables
-    let ssh_port      = unwrap_or_else!(ssh_port, env_var("DEFAULT_SSH_PORT")?.parse::<u16>().context(ParseInt { var: "DEFAULT_SSH_PORT" })?);
-    let ssh_user      = unwrap_or_else!(ssh_user, env_var("DEFAULT_SSH_USER")?);
-    let owner         = unwrap_or_else!(owner, env_var("DEFAULT_OWNER")?);
-    let provider_id   = ok_or_else!(provider,
+    let ssh_port       = unwrap_or_else!(ssh_port, env_var("DEFAULT_SSH_PORT")?.parse::<u16>().context(ParseInt { var: "DEFAULT_SSH_PORT" })?);
+    let ssh_user       = unwrap_or_else!(ssh_user, env_var("DEFAULT_SSH_USER")?);
+    let wireguard_port = unwrap_or_else!(wireguard_port, env_var("DEFAULT_WIREGUARD_PORT")?.parse::<u16>().context(ParseInt { var: "DEFAULT_WIREGUARD_PORT" })?);
+    let owner          = unwrap_or_else!(owner, env_var("DEFAULT_OWNER")?);
+    let provider_id    = ok_or_else!(provider,
         match env_var("DEFAULT_PROVIDER") {
             Ok(s) => Some(s.parse::<u32>().context(ParseInt { var: "DEFAULT_PROVIDER" })?),
             Err(_) => None,
@@ -368,25 +365,14 @@ fn add_machine(
         Some(ip) => IpNetwork::new(IpAddr::V4(ip), 32).unwrap(),
         None => get_unused_wireguard_ip(&connection, start_ip, end_ip)?,
     };
-    let wireguard_pubkey = match wireguard_pubkey {
-        Some(pubkey) => pubkey.clone().into_bytes(),
-        None => {
-            let wireguard::Keypair { privkey, pubkey } = wireguard::generate_keypair()?;
-
-            let private_key_file = rt_format!(path_template, hostname = hostname, wireguard_ip = wireguard_ip).map_err(|_| Error::FormatString)?;
-            let private_key_path = Path::new(&private_key_file);
-            fs::create_dir_all(private_key_path.parent().ok_or(Error::NoParentDirectory)?)?;
-            let mut file = fs::File::create(private_key_file).context(Io)?;
-
-            file.write_all(&privkey).context(Io)?;
-            pubkey
-        },
-    };
+    let keypair = wireguard::generate_keypair()?;
 
     let machine = NewMachine {
         hostname: hostname.into(),
         wireguard_ip: Some(wireguard_ip),
-        wireguard_pubkey: Some(str::from_utf8(&wireguard_pubkey).unwrap().to_string()),
+        wireguard_port: Some(i32::from(wireguard_port)),
+        wireguard_privkey: Some(str::from_utf8(&keypair.privkey).unwrap().to_string()),
+        wireguard_pubkey: Some(str::from_utf8(&keypair.pubkey).unwrap().to_string()),
         ssh_port: Some(i32::from(ssh_port)),
         ssh_user: Some(ssh_user),
         owner,
@@ -582,13 +568,11 @@ enum InfrabaseCommand {
         #[structopt(long)]
         wireguard_ip: Option<Ipv4Addr>,
 
-        /// WireGuard public key
+        /// WireGuard port
         ///
-        /// If one is not provided, a new private key will be generated and
-        /// saved to a file specified by WIREGUARD_PRIVATE_KEY_PATH_TEMPLATE
-        /// from the environment.
+        /// If one is not provided, DEFAULT_WIREGUARD_PORT will be used from the environment.
         #[structopt(long)]
-        wireguard_pubkey: Option<String>,
+        wireguard_port: Option<u16>,
 
         /// Provider
         ///
@@ -657,7 +641,7 @@ enum AddressCommand {
         #[structopt(long)]
         ssh_port: Option<u16>,
 
-        /// SSH port
+        /// WireGuard port
         ///
         /// If one is not provided, DEFAULT_WIREGUARD_PORT will be used from the environment.
         #[structopt(long)]
@@ -710,8 +694,8 @@ fn run() -> Result<()> {
         InfrabaseCommand::NixData => {
             nix_data(&connection)?;
         },
-        InfrabaseCommand::Add { hostname, owner, ssh_port, ssh_user, wireguard_ip, wireguard_pubkey, provider } => {
-            add_machine(&connection, &hostname, owner, ssh_port, ssh_user, wireguard_ip, &wireguard_pubkey, provider)?;
+        InfrabaseCommand::Add { hostname, owner, ssh_port, ssh_user, wireguard_ip, wireguard_port, provider } => {
+            add_machine(&connection, &hostname, owner, ssh_port, ssh_user, wireguard_ip, wireguard_port, provider)?;
         },
         InfrabaseCommand::Remove { hostname } => {
             remove_machine(&connection, &hostname)?;

@@ -8,6 +8,8 @@ use crate::schema::{machines, machine_addresses, networks, providers};
 pub struct Machine {
     pub hostname: String,
     pub wireguard_ip: Option<IpNetwork>,
+    pub wireguard_port: Option<i32>,
+    pub wireguard_privkey: Option<String>,
     pub wireguard_pubkey: Option<String>,
     pub ssh_port: Option<i32>,
     pub ssh_user: Option<String>,
@@ -21,6 +23,8 @@ pub struct Machine {
 pub struct NewMachine {
     pub hostname: String,
     pub wireguard_ip: Option<IpNetwork>,
+    pub wireguard_port: Option<i32>,
+    pub wireguard_privkey: Option<String>,
     pub wireguard_pubkey: Option<String>,
     pub ssh_port: Option<i32>,
     pub ssh_user: Option<String>,

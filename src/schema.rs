@@ -12,6 +12,8 @@ table! {
     machines (hostname) {
         hostname -> Varchar,
         wireguard_ip -> Nullable<Inet>,
+        wireguard_port -> Nullable<Int4>,
+        wireguard_privkey -> Nullable<Varchar>,
         wireguard_pubkey -> Nullable<Varchar>,
         ssh_port -> Nullable<Int4>,
         ssh_user -> Nullable<Varchar>,
