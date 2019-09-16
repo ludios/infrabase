@@ -236,10 +236,6 @@ fn list_addresses(connection: &PgConnection) -> Result<()> {
     print_tabwriter(tw)
 }
 
-fn format_address(address: &MachineAddress) -> String {
-    format!("{}={}", address.network, address.address.ip())
-}
-
 fn sort_machines_and_addresses(data: &mut MachinesAndAddresses) {
     // natural_sort refuses to compare string segments with integer segments,
     // so if returns None, fall back to String cmp.
@@ -261,7 +257,9 @@ fn list_machines(connection: &PgConnection) -> Result<()> {
                  format_wireguard_ip(&machine.wireguard_ip),
                  machine.owner,
                  format_provider(machine.provider_id),
-                 addresses.iter().map(format_address).join(" ")
+                 addresses.iter().map(|a| {
+                     format!("{}={}", a.network, a.address.ip())
+                 }).join(" ")
         ).context(Io)?;
     }
     print_tabwriter(tw)
