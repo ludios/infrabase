@@ -485,21 +485,24 @@ fn print_wg_quick(connection: &PgConnection, for_machine: &str) -> Result<()> {
             .filter(|(s, d)| network_links_map.contains_key(&(s.to_string(), d.to_string())))
             .collect::<Vec<_>>();
         network_to_network.sort_unstable_by_key(|(s, d)| network_links_map.get(&(s.to_string(), d.to_string())).unwrap());
-        // TODO: go to next network if no wireguard port
-        let (address, wireguard_port) = match network_to_network.get(0) {
-            None => {
-                (None, None)
-            },
+        // TODO: try more dest_network if no wireguard_port for first
+        let endpoint = match network_to_network.get(0) {
             Some((_, dest_network)) => {
-                let desired_address = addresses.iter().find(|a| a.network == **dest_network).unwrap();
-                (Some(desired_address.address.ip()), desired_address.wireguard_port)
-            }
+                let desired_address = addresses.iter().find(|a| a.network == **dest_network);
+                match desired_address {
+                    Some(address) if address.wireguard_port != None => Some((address.address.ip(), address.wireguard_port.unwrap())),
+                    _ => None,
+                }
+            },
+            None => None,
         };
 
+        // If we have a wireguard peer
         if let (Some(wireguard_ip), Some(wireguard_pubkey)) = (machine.wireguard_ip, &machine.wireguard_pubkey) {
-            let maybe_endpoint = match (address, wireguard_port) {
-                (Some(address), Some(port)) => format!("Endpoint = {}:{}", address, port),
-                _ => "".into(),
+            // If we have an endpoint for the wireguard peer
+            let maybe_endpoint = match endpoint {
+                Some((address, port)) => format!("Endpoint = {}:{}", address, port),
+                None => "".into(),
             };
             println!(indoc!("
                 # {}
