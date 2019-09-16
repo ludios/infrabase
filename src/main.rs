@@ -411,24 +411,35 @@ fn remove_machine(connection: &PgConnection, hostname: &str) -> Result<()> {
     Ok(())
 }
 
-fn print_ssh_config(connection: &PgConnection, for_machine: &str) -> Result<()> {
-    let (data, network_links_map) = connection.transaction::<_, Error, _>(|| {
+fn get_data_and_network_links_map(connection: &PgConnection) -> Result<(MachinesAndAddresses, NetworkLinksMap)> {
+    connection.transaction::<_, Error, _>(|| {
         let data = get_machines_and_addresses(&connection)?;
         let network_links_map = get_network_links_map(&connection)?;
         Ok((data, network_links_map))
-    })?;
+    })
+}
+
+#[allow(clippy::ptr_arg)]
+fn get_source_networks(data: &MachinesAndAddresses, for_machine: &str) -> Result<Vec<String>> {
     let source_machine = data.iter().find(|(machine, _)| machine.hostname == for_machine);
-    let source_networks = match source_machine {
+    Ok(match source_machine {
         None => return Err(Error::NoSuchMachine { hostname: for_machine.into() }),
         Some((_, addresses)) => {
             addresses.iter().map(|a| a.network.clone()).collect::<Vec<_>>()
         }
-    };
+    })
+}
+
+fn print_ssh_config(connection: &PgConnection, for_machine: &str) -> Result<()> {
+    let (data, network_links_map) = get_data_and_network_links_map(connection)?;
+    let source_networks = get_source_networks(&data, for_machine)?;
 
     println!("# infrabase-generated SSH config for {}\n", for_machine);
 
     for (machine, addresses) in &data {
+        // Networks the destination machine is on
         let dest_networks = addresses.iter().map(|a| a.network.clone()).collect::<Vec<_>>();
+        // (source, dest) network pairs
         let mut network_to_network = iproduct!(&source_networks, &dest_networks)
             .filter(|(s, d)| network_links_map.contains_key(&(s.to_string(), d.to_string())))
             .collect::<Vec<_>>();
@@ -458,18 +469,8 @@ fn print_ssh_config(connection: &PgConnection, for_machine: &str) -> Result<()> 
 }
 
 fn print_wg_quick(connection: &PgConnection, for_machine: &str) -> Result<()> {
-    let (data, network_links_map) = connection.transaction::<_, Error, _>(|| {
-        let data = get_machines_and_addresses(&connection)?;
-        let network_links_map = get_network_links_map(&connection)?;
-        Ok((data, network_links_map))
-    })?;
-    let source_machine = data.iter().find(|(machine, _)| machine.hostname == for_machine);
-    let source_networks = match source_machine {
-        None => return Err(Error::NoSuchMachine { hostname: for_machine.into() }),
-        Some((_, addresses)) => {
-            addresses.iter().map(|a| a.network.clone()).collect::<Vec<_>>()
-        }
-    };
+    let (data, network_links_map) = get_data_and_network_links_map(connection)?;
+    let source_networks = get_source_networks(&data, for_machine)?;
 
     println!(indoc!("
         # infrabase-generated wg-quick config for {}
@@ -490,7 +491,6 @@ fn print_wg_quick(connection: &PgConnection, for_machine: &str) -> Result<()> {
             .filter(|(s, d)| network_links_map.contains_key(&(s.to_string(), d.to_string())))
             .collect::<Vec<_>>();
         network_to_network.sort_unstable_by_key(|(s, d)| network_links_map.get(&(s.to_string(), d.to_string())).unwrap());
-        // TODO: try more dest_network if no wireguard_port for first
         let endpoint = match network_to_network.get(0) {
             Some((_, dest_network)) => {
                 let desired_address = addresses.iter().find(|a| a.network == **dest_network);
