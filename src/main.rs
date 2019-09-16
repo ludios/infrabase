@@ -518,7 +518,7 @@ fn print_wg_quick(connection: &PgConnection, for_machine: &str) -> Result<()> {
         if let (Some(wireguard_ip), Some(wireguard_pubkey)) = (machine.wireguard_ip, &machine.wireguard_pubkey) {
             // If we have an endpoint for the wireguard peer
             let maybe_endpoint = match endpoint {
-                Some((address, port)) => format!("Endpoint = {}:{}", address, port),
+                Some((address, port)) => format!("Endpoint = {}:{}\n", address, port),
                 None => "".into(),
             };
             println!(indoc!("
@@ -526,7 +526,7 @@ fn print_wg_quick(connection: &PgConnection, for_machine: &str) -> Result<()> {
                 [Peer]
                 PublicKey = {}
                 AllowedIPs = {}
-                {}
+                {}\
             "), machine.hostname, wireguard_pubkey, wireguard_ip, maybe_endpoint);
         }
     }
