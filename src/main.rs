@@ -430,6 +430,25 @@ fn get_source_networks(data: &MachinesAndAddresses, for_machine: &str) -> Result
     })
 }
 
+/// Return a Vec of (source_network, dest_network) pairs appropriate for
+/// establishing a connection to `addresses`, highest priority first
+fn get_network_to_network(
+    source_networks: &[String],
+    addresses: &[MachineAddress],
+    network_links_map: &NetworkLinksMap,
+) -> Vec<(String, String)> {
+    // Convert because we need Strings in our return
+    let source_networks = source_networks.iter().map(String::from).collect::<Vec<_>>();
+    // Networks the destination machine is on
+    let dest_networks = addresses.iter().map(|a| a.network.clone()).collect::<Vec<_>>();
+    // (source, dest) network pairs
+    let mut network_to_network = iproduct!(source_networks, dest_networks)
+        .filter(|(s, d)| network_links_map.contains_key(&(s.to_string(), d.to_string())))
+        .collect::<Vec<(String, String)>>();
+    network_to_network.sort_unstable_by_key(|(s, d)| network_links_map.get(&(s.to_string(), d.to_string())).unwrap());
+    network_to_network
+}
+
 fn print_ssh_config(connection: &PgConnection, for_machine: &str) -> Result<()> {
     let (data, network_links_map) = get_data_and_network_links_map(connection)?;
     let source_networks = get_source_networks(&data, for_machine)?;
@@ -437,13 +456,7 @@ fn print_ssh_config(connection: &PgConnection, for_machine: &str) -> Result<()> 
     println!("# infrabase-generated SSH config for {}\n", for_machine);
 
     for (machine, addresses) in &data {
-        // Networks the destination machine is on
-        let dest_networks = addresses.iter().map(|a| a.network.clone()).collect::<Vec<_>>();
-        // (source, dest) network pairs
-        let mut network_to_network = iproduct!(&source_networks, &dest_networks)
-            .filter(|(s, d)| network_links_map.contains_key(&(s.to_string(), d.to_string())))
-            .collect::<Vec<_>>();
-        network_to_network.sort_unstable_by_key(|(s, d)| network_links_map.get(&(s.to_string(), d.to_string())).unwrap());
+        let network_to_network = get_network_to_network(&source_networks, addresses, &network_links_map);
         let (address, ssh_port) = match network_to_network.get(0) {
             None => {
                 // We prefer to SSH over the non-WireGuard IP in case WireGuard is down,
@@ -485,17 +498,14 @@ fn print_wg_quick(connection: &PgConnection, for_machine: &str) -> Result<()> {
             // We don't need a [Peer] for ourselves
             continue;
         }
-
-        let dest_networks = addresses.iter().map(|a| a.network.clone()).collect::<Vec<_>>();
-        let mut network_to_network = iproduct!(&source_networks, &dest_networks)
-            .filter(|(s, d)| network_links_map.contains_key(&(s.to_string(), d.to_string())))
-            .collect::<Vec<_>>();
-        network_to_network.sort_unstable_by_key(|(s, d)| network_links_map.get(&(s.to_string(), d.to_string())).unwrap());
+        let network_to_network = get_network_to_network(&source_networks, addresses, &network_links_map);
         let endpoint = match network_to_network.get(0) {
             Some((_, dest_network)) => {
                 let desired_address = addresses.iter().find(|a| a.network == **dest_network);
                 match desired_address {
-                    Some(address) if address.wireguard_port != None => Some((address.address.ip(), address.wireguard_port.unwrap())),
+                    Some(MachineAddress { address, wireguard_port: Some(port), .. }) => {
+                        Some((address.ip(), port))
+                    },
                     _ => None,
                 }
             },
