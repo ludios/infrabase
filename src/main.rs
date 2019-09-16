@@ -480,6 +480,11 @@ fn print_wg_quick(connection: &PgConnection, for_machine: &str) -> Result<()> {
     "), for_machine);
 
     for (machine, addresses) in &data {
+        if machine.hostname == for_machine {
+            // We don't need a [Peer] for ourselves
+            continue;
+        }
+
         let dest_networks = addresses.iter().map(|a| a.network.clone()).collect::<Vec<_>>();
         let mut network_to_network = iproduct!(&source_networks, &dest_networks)
             .filter(|(s, d)| network_links_map.contains_key(&(s.to_string(), d.to_string())))
