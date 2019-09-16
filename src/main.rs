@@ -93,9 +93,9 @@ fn establish_connection() -> Result<PgConnection> {
 }
 
 /// A map of (network, other_network) -> priority
-type NetworkLinksMap = HashMap<(String, String), i32>;
+type NetworkLinksPriorityMap = HashMap<(String, String), i32>;
 
-fn get_network_links_map(connection: &PgConnection) -> DieselResult<NetworkLinksMap> {
+fn get_network_links_priority_map(connection: &PgConnection) -> DieselResult<NetworkLinksPriorityMap> {
     let map = network_links::table
         .load::<NetworkLink>(connection)?
         .into_iter()
@@ -411,11 +411,11 @@ fn remove_machine(connection: &PgConnection, hostname: &str) -> Result<()> {
     Ok(())
 }
 
-fn get_data_and_network_links_map(connection: &PgConnection) -> Result<(MachinesAndAddresses, NetworkLinksMap)> {
+fn get_data_and_network_links_priority_map(connection: &PgConnection) -> Result<(MachinesAndAddresses, NetworkLinksPriorityMap)> {
     connection.transaction::<_, Error, _>(|| {
         let data = get_machines_and_addresses(&connection)?;
-        let network_links_map = get_network_links_map(&connection)?;
-        Ok((data, network_links_map))
+        let network_links_priority_map = get_network_links_priority_map(&connection)?;
+        Ok((data, network_links_priority_map))
     })
 }
 
@@ -433,30 +433,32 @@ fn get_source_networks(data: &MachinesAndAddresses, for_machine: &str) -> Result
 /// Return a Vec of (source_network, dest_network) pairs appropriate for
 /// establishing a connection to `addresses`, highest priority first
 fn get_network_to_network(
+    network_links_priority_map: &NetworkLinksPriorityMap,
     source_networks: &[String],
     addresses: &[MachineAddress],
-    network_links_map: &NetworkLinksMap,
 ) -> Vec<(String, String)> {
     // Convert because we need Strings in our return
     let source_networks = source_networks.iter().map(String::from).collect::<Vec<_>>();
+
     // Networks the destination machine is on
     let dest_networks = addresses.iter().map(|a| a.network.clone()).collect::<Vec<_>>();
+
     // (source, dest) network pairs
     let mut network_to_network = iproduct!(source_networks, dest_networks)
-        .filter(|(s, d)| network_links_map.contains_key(&(s.to_string(), d.to_string())))
+        .filter(|(s, d)| network_links_priority_map.contains_key(&(s.to_string(), d.to_string())))
         .collect::<Vec<(String, String)>>();
-    network_to_network.sort_unstable_by_key(|(s, d)| network_links_map.get(&(s.to_string(), d.to_string())).unwrap());
+    network_to_network.sort_unstable_by_key(|(s, d)| network_links_priority_map.get(&(s.to_string(), d.to_string())).unwrap());
     network_to_network
 }
 
 fn print_ssh_config(connection: &PgConnection, for_machine: &str) -> Result<()> {
-    let (data, network_links_map) = get_data_and_network_links_map(connection)?;
+    let (data, network_links_priority_map) = get_data_and_network_links_priority_map(connection)?;
     let source_networks = get_source_networks(&data, for_machine)?;
 
     println!("# infrabase-generated SSH config for {}\n", for_machine);
 
     for (machine, addresses) in &data {
-        let network_to_network = get_network_to_network(&source_networks, addresses, &network_links_map);
+        let network_to_network = get_network_to_network(&network_links_priority_map, &source_networks, addresses);
         let (address, ssh_port) = match network_to_network.get(0) {
             None => {
                 // We prefer to SSH over the non-WireGuard IP in case WireGuard is down,
@@ -482,7 +484,7 @@ fn print_ssh_config(connection: &PgConnection, for_machine: &str) -> Result<()> 
 }
 
 fn print_wg_quick(connection: &PgConnection, for_machine: &str) -> Result<()> {
-    let (data, network_links_map) = get_data_and_network_links_map(connection)?;
+    let (data, network_links_priority_map) = get_data_and_network_links_priority_map(connection)?;
     let source_networks = get_source_networks(&data, for_machine)?;
 
     println!(indoc!("
@@ -498,7 +500,7 @@ fn print_wg_quick(connection: &PgConnection, for_machine: &str) -> Result<()> {
             // We don't need a [Peer] for ourselves
             continue;
         }
-        let network_to_network = get_network_to_network(&source_networks, addresses, &network_links_map);
+        let network_to_network = get_network_to_network(&network_links_priority_map, &source_networks, addresses);
         let endpoint = match network_to_network.get(0) {
             Some((_, dest_network)) => {
                 let desired_address = addresses.iter().find(|a| a.network == **dest_network);
