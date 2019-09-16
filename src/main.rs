@@ -471,13 +471,13 @@ fn print_wg_quick(connection: &PgConnection, for_machine: &str) -> Result<()> {
         }
     };
 
-    println!("\
-        # infrabase-generated wg-quick config for {}\n\
-        \n\
-        [Interface]\n\
-        PrivateKey = \n\
-        ListenPort = \n\
-    ", for_machine);
+    println!(indoc!("
+        # infrabase-generated wg-quick config for {}
+
+        [Interface]
+        PrivateKey =
+        ListenPort =
+    "), for_machine);
 
     for (machine, addresses) in &data {
         let dest_networks = addresses.iter().map(|a| a.network.clone()).collect::<Vec<_>>();
