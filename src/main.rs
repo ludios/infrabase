@@ -31,8 +31,9 @@ use ipnetwork::IpNetwork;
 use itertools::Itertools;
 
 use nix::ToNix;
-use schema::{machines, machine_addresses, network_links, providers};
+use schema::{machines, machine_addresses, network_links, providers, wireguard_keepalives};
 use models::{Machine, NewMachine, MachineAddress, NetworkLink, Provider};
+use crate::models::WireguardKeepalive;
 
 #[derive(Debug, Snafu)]
 pub(crate) enum Error {
@@ -144,6 +145,15 @@ fn print_tabwriter(tw: TabWriter<Vec<u8>>) -> Result<()> {
     std::io::stdout().write_all(&bytes).context(Io)
 }
 
+/// Write a table header to a TabWriter
+fn write_column_names(tw: &mut TabWriter<Vec<u8>>, headers: Vec<&str>) -> Result<()> {
+    tw.write_all(headers.join("\t").as_bytes()).context(Io)?;
+    tw.write_all("\n".as_bytes()).context(Io)?;
+    tw.write_all(headers.iter().map(|h| str::repeat("-", h.len())).join("\t").as_bytes()).context(Io)?;
+    tw.write_all("\n".as_bytes()).context(Io)?;
+    Ok(())
+}
+
 fn list_providers(connection: &PgConnection) -> Result<()> {
     let providers = providers::table
         .load::<Provider>(connection)?;
@@ -160,13 +170,20 @@ fn list_providers(connection: &PgConnection) -> Result<()> {
     print_tabwriter(tw)
 }
 
-/// Write a table header to a TabWriter
-fn write_column_names(tw: &mut TabWriter<Vec<u8>>, headers: Vec<&str>) -> Result<()> {
-    tw.write_all(headers.join("\t").as_bytes()).context(Io)?;
-    tw.write_all("\n".as_bytes()).context(Io)?;
-    tw.write_all(headers.iter().map(|h| str::repeat("-", h.len())).join("\t").as_bytes()).context(Io)?;
-    tw.write_all("\n".as_bytes()).context(Io)?;
-    Ok(())
+fn list_wireguard_keepalives(connection: &PgConnection) -> Result<()> {
+    let keepalives = wireguard_keepalives::table
+        .load::<WireguardKeepalive>(connection)?;
+
+    let mut tw = TabWriter::new(vec![]);
+    write_column_names(&mut tw, vec!["SOURCE", "TARGET", "INTERVAL"])?;
+    for keepalive in &keepalives {
+        writeln!(tw, "{}\t{}\t{}",
+                 keepalive.source_machine,
+                 keepalive.target_machine,
+                 keepalive.interval_sec
+        ).context(Io)?;
+    }
+    print_tabwriter(tw)
 }
 
 fn add_address(
@@ -526,6 +543,10 @@ fn print_wg_quick(connection: &PgConnection, for_machine: &str) -> Result<()> {
 #[structopt(name = "infrabase")]
 /// the machine inventory system
 enum InfrabaseCommand {
+    /// Subcommands to work with WireGuard persistent keepalives
+    #[structopt(name = "wg-keepalive")]
+    WireguardKeepalive(WireguardKeepaliveCommand),
+
     /// Subcommands to work with providers
     #[structopt(name = "provider")]
     Provider(ProviderCommand),
@@ -613,6 +634,13 @@ enum InfrabaseCommand {
 }
 
 #[derive(StructOpt, Debug)]
+enum WireguardKeepaliveCommand {
+    #[structopt(name = "ls")]
+    /// List WireGuard persistent keepalives
+    List,
+}
+
+#[derive(StructOpt, Debug)]
 enum ProviderCommand {
     #[structopt(name = "ls")]
     /// List providers
@@ -691,6 +719,11 @@ fn run() -> Result<()> {
                 AddressCommand::Remove { hostname, network, address } => {
                     remove_address(&connection, &hostname, &network, address)?
                 },
+            }
+        },
+        InfrabaseCommand::WireguardKeepalive(cmd) => {
+            match cmd {
+                WireguardKeepaliveCommand::List => list_wireguard_keepalives(&connection)?,
             }
         },
         InfrabaseCommand::List => {

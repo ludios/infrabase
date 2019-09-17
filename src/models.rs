@@ -47,8 +47,8 @@ pub struct MachineAddress {
 #[derive(Identifiable, Insertable, Queryable, Associations, Debug)]
 #[primary_key(source_machine, target_machine)]
 #[belongs_to(Machine, foreign_key = "source_machine")]
-#[table_name = "wireguard_persistent_keepalives"]
-pub struct WireguardPersistentKeepalive {
+#[table_name = "wireguard_keepalives"]
+pub struct WireguardKeepalive {
     pub source_machine: String,
     pub target_machine: String,
     pub interval_sec: i32,

@@ -58,7 +58,7 @@ CREATE TABLE machines (
     UNIQUE (wireguard_pubkey)
 );
 
-CREATE TABLE wireguard_persistent_keepalives (
+CREATE TABLE wireguard_keepalives (
     source_machine hostname NOT NULL REFERENCES machines(hostname),
     target_machine hostname NOT NULL REFERENCES machines(hostname),
     -- `man wg` says "PersistentKeepalive — a seconds interval, between 1 and 65535 inclusive"
