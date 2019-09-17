@@ -406,9 +406,7 @@ fn add_machine(
 fn remove_machine(connection: &PgConnection, hostname: &str) -> Result<()> {
     let num_deleted = diesel::delete(machines::table.filter(machines::hostname.eq(hostname)))
         .execute(connection)?;
-    if num_deleted != 1 {
-        return Err(Error::NoSuchMachine { hostname: hostname.into() });
-    }
+    ensure!(num_deleted == 1, NoSuchMachine { hostname });
     Ok(())
 }
 
@@ -423,12 +421,9 @@ fn get_data_and_network_links_priority_map(connection: &PgConnection) -> Result<
 #[allow(clippy::ptr_arg)]
 fn get_source_networks(data: &MachinesAndAddresses, for_machine: &str) -> Result<Vec<String>> {
     let source_machine = data.iter().find(|(machine, _)| machine.hostname == for_machine);
-    Ok(match source_machine {
-        None => return Err(Error::NoSuchMachine { hostname: for_machine.into() }),
-        Some((_, addresses)) => {
-            addresses.iter().map(|a| a.network.clone()).collect::<Vec<_>>()
-        }
-    })
+    ensure!(source_machine.is_some(), NoSuchMachine { hostname: for_machine });
+    let addresses = &source_machine.unwrap().1;
+    Ok(addresses.iter().map(|a| a.network.clone()).collect::<Vec<_>>())
 }
 
 /// Return a Vec of (source_network, dest_network) pairs appropriate for
