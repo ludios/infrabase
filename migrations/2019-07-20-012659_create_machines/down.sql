@@ -1,5 +1,6 @@
 DROP TABLE machine_addresses;
 DROP TABLE machines;
+DROP TABLE wireguard_persistent_keepalives;
 DROP TABLE network_links;
 DROP TABLE networks;
 DROP TABLE providers;

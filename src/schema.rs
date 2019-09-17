@@ -51,6 +51,14 @@ table! {
     }
 }
 
+table! {
+    wireguard_persistent_keepalives (source_machine, target_machine) {
+        source_machine -> Varchar,
+        target_machine -> Varchar,
+        interval_sec -> Int4,
+    }
+}
+
 joinable!(machine_addresses -> machines (hostname));
 joinable!(machine_addresses -> networks (network));
 joinable!(machines -> owners (owner));
@@ -63,4 +71,5 @@ allow_tables_to_appear_in_same_query!(
     networks,
     owners,
     providers,
+    wireguard_persistent_keepalives,
 );

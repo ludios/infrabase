@@ -58,6 +58,14 @@ CREATE TABLE machines (
     UNIQUE (wireguard_pubkey)
 );
 
+CREATE TABLE wireguard_persistent_keepalives (
+    source_machine hostname NOT NULL REFERENCES machines(hostname),
+    target_machine hostname NOT NULL REFERENCES machines(hostname),
+    -- `man wg` says "PersistentKeepalive — a seconds interval, between 1 and 65535 inclusive"
+    interval_sec   integer  NOT NULL CHECK (interval_sec >= 1 AND interval_sec <= 65535),
+    PRIMARY KEY (source_machine, target_machine)
+);
+
 -- Note: you should use a different WireGuard port for each machine behind the same NAT.
 --
 -- WireGuard remembers just one endpoint per machine and if it gets a packet from IP:904

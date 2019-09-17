@@ -1,6 +1,6 @@
 use ipnetwork::IpNetwork;
 use chrono::{DateTime, Utc};
-use crate::schema::{machines, machine_addresses, networks, providers};
+use crate::schema::*;
 
 #[derive(Identifiable, Queryable, Debug)]
 #[primary_key(hostname)]
@@ -42,6 +42,16 @@ pub struct MachineAddress {
     pub address: IpNetwork,
     pub ssh_port: Option<i32>,
     pub wireguard_port: Option<i32>,
+}
+
+#[derive(Identifiable, Insertable, Queryable, Associations, Debug)]
+#[primary_key(source_machine, target_machine)]
+#[belongs_to(Machine, foreign_key = "source_machine")]
+#[table_name = "wireguard_persistent_keepalives"]
+pub struct WireguardPersistentKeepalive {
+    pub source_machine: String,
+    pub target_machine: String,
+    pub interval_sec: i32,
 }
 
 #[derive(Identifiable, Queryable, Debug)]
