@@ -23,7 +23,7 @@ use tabwriter::{TabWriter, IntoInnerError};
 use diesel::prelude::*;
 use diesel::pg::PgConnection;
 use dotenv;
-use snafu::{ResultExt, Snafu, Backtrace, ErrorCompat};
+use snafu::{ensure, ResultExt, Snafu, Backtrace, ErrorCompat};
 use structopt::StructOpt;
 use indoc::indoc;
 use natural_sort::HumanStr;
@@ -54,6 +54,8 @@ pub(crate) enum Error {
     AddrParse { source: std::net::AddrParseError, var: String },
     #[snafu(display("Could not find an unused WireGuard IP address; check WIREGUARD_IP_START and WIREGUARD_IP_END"))]
     NoWireGuardAddressAvailable,
+    #[snafu(display("Machine {} does not have a WireGuard IP", hostname))]
+    MachineHasNoWireGuard { hostname: String },
     NonZeroExit,
     NoStdin,
     FormatString,
@@ -201,9 +203,7 @@ fn remove_address(connection: &PgConnection, hostname: &str, network: &str, addr
             .filter(machine_addresses::network.eq(network))
             .filter(machine_addresses::address.eq(ipnetwork))
     ).execute(connection)?;
-    if num_deleted != 1 {
-        return Err(Error::NoSuchAddress { hostname: hostname.into(), network: network.into(), address: ipnetwork });
-    }
+    ensure!(num_deleted == 1, NoSuchAddress { hostname: hostname, network: network, address: ipnetwork });
     Ok(())
 }
 
@@ -471,13 +471,18 @@ fn print_wg_quick(connection: &PgConnection, for_machine: &str) -> Result<()> {
     let (data, network_links_priority_map) = get_data_and_network_links_priority_map(connection)?;
     let source_networks = get_source_networks(&data, for_machine)?;
 
+    let (my_machine, _) = data.iter().find(|(machine, _)| machine.hostname == for_machine).unwrap();
+
+    ensure!(my_machine.wireguard_ip.is_some(), MachineHasNoWireGuard { hostname: for_machine });
+
     println!(indoc!("
         # infrabase-generated wg-quick config for {}
 
         [Interface]
-        PrivateKey =
-        ListenPort =
-    "), for_machine);
+        Address = {}/32
+        PrivateKey = {}
+        ListenPort = {}
+    "), for_machine, my_machine.wireguard_ip.unwrap().ip(), my_machine.wireguard_privkey.as_ref().unwrap(), my_machine.wireguard_port.unwrap());
 
     for (machine, addresses) in &data {
         if machine.hostname == for_machine {
