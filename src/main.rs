@@ -32,8 +32,7 @@ use itertools::Itertools;
 
 use nix::ToNix;
 use schema::{machines, machine_addresses, network_links, providers, wireguard_keepalives};
-use models::{Machine, NewMachine, MachineAddress, NetworkLink, Provider};
-use crate::models::WireguardKeepalive;
+use models::{Machine, NewMachine, MachineAddress, NetworkLink, Provider, WireguardKeepalive};
 
 #[derive(Debug, Snafu)]
 pub(crate) enum Error {
@@ -95,11 +94,23 @@ fn establish_connection() -> Result<PgConnection> {
 /// A map of (network, other_network) -> priority
 type NetworkLinksPriorityMap = HashMap<(String, String), i32>;
 
+/// A map of (source_machine, target_machine) -> interval
+type WireguardKeepaliveIntervalMap = HashMap<(String, String), i32>;
+
 fn get_network_links_priority_map(connection: &PgConnection) -> DieselResult<NetworkLinksPriorityMap> {
     let map = network_links::table
         .load::<NetworkLink>(connection)?
         .into_iter()
         .map(|row| ((row.name, row.other_network), row.priority))
+        .collect::<HashMap<_, _>>();
+    Ok(map)
+}
+
+fn get_wireguard_keepalive_map(connection: &PgConnection) -> DieselResult<WireguardKeepaliveIntervalMap> {
+    let map = wireguard_keepalives::table
+        .load::<WireguardKeepalive>(connection)?
+        .into_iter()
+        .map(|row| ((row.source_machine, row.target_machine), row.interval_sec))
         .collect::<HashMap<_, _>>();
     Ok(map)
 }
@@ -410,14 +421,6 @@ fn remove_machine(connection: &PgConnection, hostname: &str) -> Result<()> {
     Ok(())
 }
 
-fn get_data_and_network_links_priority_map(connection: &PgConnection) -> Result<(MachinesAndAddresses, NetworkLinksPriorityMap)> {
-    connection.transaction::<_, Error, _>(|| {
-        let data = get_machines_and_addresses(&connection)?;
-        let network_links_priority_map = get_network_links_priority_map(&connection)?;
-        Ok((data, network_links_priority_map))
-    })
-}
-
 #[allow(clippy::ptr_arg)]
 fn get_source_networks(data: &MachinesAndAddresses, for_machine: &str) -> Result<Vec<String>> {
     let source_machine = data.iter().find(|(machine, _)| machine.hostname == for_machine);
@@ -448,7 +451,12 @@ fn get_network_to_network(
 }
 
 fn print_ssh_config(connection: &PgConnection, for_machine: &str) -> Result<()> {
-    let (data, network_links_priority_map) = get_data_and_network_links_priority_map(connection)?;
+    let (data, network_links_priority_map) = connection.transaction::<_, Error, _>(|| {
+        Ok((
+            get_machines_and_addresses(&connection)?,
+            get_network_links_priority_map(&connection)?
+        ))
+    })?;
     let source_networks = get_source_networks(&data, for_machine)?;
 
     println!("# infrabase-generated SSH config for {}\n", for_machine);
@@ -480,11 +488,16 @@ fn print_ssh_config(connection: &PgConnection, for_machine: &str) -> Result<()> 
 }
 
 fn print_wg_quick(connection: &PgConnection, for_machine: &str) -> Result<()> {
-    let (data, network_links_priority_map) = get_data_and_network_links_priority_map(connection)?;
+    let (data, network_links_priority_map, keepalives_map) = connection.transaction::<_, Error, _>(|| {
+        Ok((
+            get_machines_and_addresses(&connection)?,
+            get_network_links_priority_map(&connection)?,
+            get_wireguard_keepalive_map(connection)?,
+        ))
+    })?;
     let source_networks = get_source_networks(&data, for_machine)?;
 
     let (my_machine, _) = data.iter().find(|(machine, _)| machine.hostname == for_machine).unwrap();
-
     ensure!(my_machine.wireguard_ip.is_some(), MachineHasNoWireGuard { hostname: for_machine });
 
     println!(indoc!("
@@ -520,7 +533,11 @@ fn print_wg_quick(connection: &PgConnection, for_machine: &str) -> Result<()> {
             // If we have an endpoint for the wireguard peer
             let maybe_endpoint = match endpoint {
                 Some((address, port)) => format!("Endpoint = {}:{}\n", address, port),
-                None => "".into(),
+                None => "".to_string(),
+            };
+            let maybe_keepalive = match keepalives_map.get(&(my_machine.hostname.to_string(), machine.hostname.to_string())) {
+                Some(interval) => format!("PersistentKeepalive = {}\n", interval),
+                None => "".to_string()
             };
             println!(indoc!("
                 # {}
@@ -528,7 +545,8 @@ fn print_wg_quick(connection: &PgConnection, for_machine: &str) -> Result<()> {
                 PublicKey = {}
                 AllowedIPs = {}
                 {}\
-            "), machine.hostname, wireguard_pubkey, wireguard_ip, maybe_endpoint);
+                {}\
+            "), machine.hostname, wireguard_pubkey, wireguard_ip, maybe_endpoint, maybe_keepalive);
         }
     }
     Ok(())
