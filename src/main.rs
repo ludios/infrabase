@@ -452,12 +452,13 @@ fn get_network_to_network(
 }
 
 fn print_ssh_config(connection: &PgConnection, for_machine: &str) -> Result<()> {
-    let (data, network_links_priority_map) = connection.transaction::<_, Error, _>(|| {
+    let (mut data, network_links_priority_map) = connection.transaction::<_, Error, _>(|| {
         Ok((
             get_machines_and_addresses(&connection)?,
             get_network_links_priority_map(&connection)?
         ))
     })?;
+    sort_machines_and_addresses(&mut data);
     let source_networks = get_source_networks(&data, for_machine)?;
 
     println!("# infrabase-generated SSH config for {}\n", for_machine);
