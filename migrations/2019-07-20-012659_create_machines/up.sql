@@ -42,16 +42,17 @@ CREATE TABLE owners (
 );
 
 CREATE TABLE machines (
-    hostname          hostname                 NOT NULL PRIMARY KEY,
-    wireguard_ip      inet,
-    wireguard_port    port                     CHECK ((wireguard_ip IS NOT NULL AND wireguard_port    IS NOT NULL) OR (wireguard_ip IS NULL AND wireguard_port    IS NULL)),
-    wireguard_privkey wireguard_key            CHECK ((wireguard_ip IS NOT NULL AND wireguard_privkey IS NOT NULL) OR (wireguard_ip IS NULL AND wireguard_privkey IS NULL)),
-    wireguard_pubkey  wireguard_key,           CHECK ((wireguard_ip IS NOT NULL AND wireguard_pubkey  IS NOT NULL) OR (wireguard_ip IS NULL AND wireguard_pubkey  IS NULL)),
-    ssh_port          port,
-    ssh_user          username                 DEFAULT 'root' CHECK ((ssh_port IS NOT NULL AND ssh_user IS NOT NULL) OR (ssh_port IS NULL AND ssh_user IS NULL)),
-    added_time        timestamp with time zone NOT NULL DEFAULT now(),
-    owner             owner                    NOT NULL REFERENCES owners(owner),
-    provider_id       integer                  REFERENCES providers(id),
+    hostname           hostname                 NOT NULL PRIMARY KEY,
+    wireguard_ip       inet,
+    wireguard_port     port                     CHECK ((wireguard_ip IS NOT NULL AND wireguard_port    IS NOT NULL) OR (wireguard_ip IS NULL AND wireguard_port    IS NULL)),
+    wireguard_privkey  wireguard_key            CHECK ((wireguard_ip IS NOT NULL AND wireguard_privkey IS NOT NULL) OR (wireguard_ip IS NULL AND wireguard_privkey IS NULL)),
+    wireguard_pubkey   wireguard_key,           CHECK ((wireguard_ip IS NOT NULL AND wireguard_pubkey  IS NOT NULL) OR (wireguard_ip IS NULL AND wireguard_pubkey  IS NULL)),
+    ssh_port           port,
+    ssh_user           username                 DEFAULT 'root' CHECK ((ssh_port IS NOT NULL AND ssh_user IS NOT NULL) OR (ssh_port IS NULL AND ssh_user IS NULL)),
+    added_time         timestamp with time zone NOT NULL DEFAULT now(),
+    owner              owner                    NOT NULL REFERENCES owners(owner),
+    provider_id        integer                  REFERENCES providers(id),
+    provider_reference text,
 
     UNIQUE (wireguard_ip),
     UNIQUE (wireguard_privkey),

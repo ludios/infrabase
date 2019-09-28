@@ -20,6 +20,7 @@ table! {
         added_time -> Timestamptz,
         owner -> Varchar,
         provider_id -> Nullable<Int4>,
+        provider_reference -> Nullable<Text>,
     }
 }
 

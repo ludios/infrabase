@@ -151,6 +151,13 @@ fn format_provider(provider: Option<i32>) -> String {
     }
 }
 
+fn format_provider_reference(reference: &Option<String>) -> String {
+    match reference {
+        Some(p) => p.to_string(),
+        None => "-".to_string(),
+    }
+}
+
 fn print_tabwriter(tw: TabWriter<Vec<u8>>) -> Result<()> {
     let bytes = tw.into_inner().context(IntoInner)?;
     std::io::stdout().write_all(&bytes).context(Io)
@@ -275,13 +282,14 @@ fn list_machines(connection: &PgConnection) -> Result<()> {
     let mut data = get_machines_and_addresses(&connection)?;
     sort_machines_and_addresses(&mut data);
     let mut tw = TabWriter::new(vec![]);
-    write_column_names(&mut tw, vec!["HOSTNAME", "WIREGUARD", "OWNER", "PROV", "ADDRESSES"])?;
+    write_column_names(&mut tw, vec!["HOSTNAME", "WIREGUARD", "OWNER", "PROV", "REFERENCE", "ADDRESSES"])?;
     for (machine, addresses) in &data {
-        writeln!(tw, "{}\t{}\t{}\t{}\t{}",
+        writeln!(tw, "{}\t{}\t{}\t{}\t{}\t{}",
                  machine.hostname,
                  format_wireguard_ip(&machine.wireguard_ip),
                  machine.owner,
                  format_provider(machine.provider_id),
+                 format_provider_reference(&machine.provider_reference),
                  addresses.iter().map(|a| {
                      format!("{}={}", a.network, a.address.ip())
                  }).join(" ")
@@ -306,13 +314,14 @@ fn nix_data(connection: &PgConnection) -> Result<()> {
     println!("{{");
     let mut tw = TabWriter::new(vec![]).padding(1);
     for (machine, addresses) in &data {
-        writeln!(tw, "  {}\t= {{ owner = {};\twireguard_ip = {};\twireguard_port = {};\tssh_port = {};\tprovider_id = {};\taddresses = {{ {}}}; }};",
+        writeln!(tw, "  {}\t= {{ owner = {};\twireguard_ip = {};\twireguard_port = {};\tssh_port = {};\tprovider_id = {};\tprovider_reference = {};\taddresses = {{ {}}}; }};",
                  machine.hostname,
                  machine.owner.to_nix(),
                  format_wireguard_ip(&machine.wireguard_ip).to_nix(),
                  machine.wireguard_port.to_nix(),
                  machine.ssh_port.to_nix(),
                  &machine.provider_id.to_nix(),
+                 &machine.provider_reference.to_nix(),
                  addresses.iter().map(format_nix_address).join("")
         ).context(Io)?;
     }
@@ -374,6 +383,7 @@ fn add_machine(
     wireguard_ip: Option<Ipv4Addr>,
     wireguard_port: Option<u16>,
     provider: Option<u32>,
+    provider_reference: Option<String>,
 ) -> Result<()> {
     // Required environmental variables
     let start_ip       = env_var("WIREGUARD_IP_START")?.parse::<Ipv4Addr>().context(AddrParse { var: "WIREGUARD_IP_START" })?;
@@ -406,6 +416,7 @@ fn add_machine(
         ssh_user: Some(ssh_user),
         owner,
         provider_id: provider_id.map(|n| i32::try_from(n).unwrap()),
+        provider_reference,
     };
 
     diesel::insert_into(machines::table)
@@ -621,6 +632,13 @@ enum InfrabaseCommand {
         /// if set, otherwise it will be left unset.
         #[structopt(long)]
         provider: Option<u32>,
+
+        /// Provider reference
+        ///
+        /// An optional arbitrary string used to correlate this machine with some reference
+        /// at the provider, like a contract ID or a server number.
+        #[structopt(long)]
+        provider_reference: Option<String>,
     },
 
     #[structopt(name = "rm")]
@@ -747,8 +765,8 @@ fn run() -> Result<()> {
         InfrabaseCommand::NixData => {
             nix_data(&connection)?;
         },
-        InfrabaseCommand::Add { hostname, owner, ssh_port, ssh_user, wireguard_ip, wireguard_port, provider } => {
-            add_machine(&connection, &hostname, owner, ssh_port, ssh_user, wireguard_ip, wireguard_port, provider)?;
+        InfrabaseCommand::Add { hostname, owner, ssh_port, ssh_user, wireguard_ip, wireguard_port, provider, provider_reference } => {
+            add_machine(&connection, &hostname, owner, ssh_port, ssh_user, wireguard_ip, wireguard_port, provider, provider_reference)?;
         },
         InfrabaseCommand::Remove { hostname } => {
             remove_machine(&connection, &hostname)?;

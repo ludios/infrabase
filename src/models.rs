@@ -16,6 +16,7 @@ pub struct Machine {
     pub added_time: DateTime<Utc>,
     pub owner: String,
     pub provider_id: Option<i32>,
+    pub provider_reference: Option<String>,
 }
 
 #[derive(Insertable, Debug)]
@@ -30,6 +31,7 @@ pub struct NewMachine {
     pub ssh_user: Option<String>,
     pub owner: String,
     pub provider_id: Option<i32>,
+    pub provider_reference: Option<String>,
 }
 
 #[derive(Identifiable, Insertable, Queryable, Associations, Debug)]
