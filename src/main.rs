@@ -53,9 +53,9 @@ pub(crate) enum Error {
     #[snafu(display("Could not parse variable {} as IP address", var))]
     AddrParse { source: std::net::AddrParseError, var: String },
     #[snafu(display("Could not find an unused WireGuard IP address; check WIREGUARD_IP_START and WIREGUARD_IP_END"))]
-    NoWireGuardAddressAvailable,
-    #[snafu(display("Machine {} does not have a WireGuard IP", hostname))]
-    MachineHasNoWireGuard { hostname: String },
+    NoWireguardAddressAvailable,
+    #[snafu(display("Machine {} does not have WireGuard", hostname))]
+    MachineHasNoWireguard { hostname: String },
     NonZeroExit,
     NoStdin,
     FormatString,
@@ -330,6 +330,15 @@ fn nix_data(connection: &PgConnection) -> Result<()> {
     Ok(())
 }
 
+fn print_wireguard_privkey(connection: &PgConnection, hostname: &str) -> Result<()> {
+    let machine = machines::table
+        .find(hostname)
+        .first::<Machine>(connection)?;
+    ensure!(machine.wireguard_privkey.is_some(), MachineHasNoWireguard { hostname });
+    println!("{}", machine.wireguard_privkey.unwrap());
+    Ok(())
+}
+
 fn get_existing_wireguard_ips(connection: &PgConnection) -> Result<impl Iterator<Item=IpNetwork>> {
     Ok(machines::table
         .load::<Machine>(connection)?
@@ -366,7 +375,7 @@ fn get_unused_wireguard_ip(connection: &PgConnection, start_ip: Ipv4Addr, end_ip
             break;
         }
     }
-    Err(Error::NoWireGuardAddressAvailable)
+    Err(Error::NoWireguardAddressAvailable)
 }
 
 fn env_var(var: &str) -> Result<String> {
@@ -511,7 +520,7 @@ fn print_wg_quick(connection: &PgConnection, for_machine: &str) -> Result<()> {
     let source_networks = get_source_networks(&data, for_machine)?;
 
     let (my_machine, _) = data.iter().find(|(machine, _)| machine.hostname == for_machine).unwrap();
-    ensure!(my_machine.wireguard_ip.is_some(), MachineHasNoWireGuard { hostname: for_machine });
+    ensure!(my_machine.wireguard_ip.is_some(), MachineHasNoWireguard { hostname: for_machine });
 
     println!(indoc!("
         # infrabase-generated wg-quick config for {}
@@ -572,6 +581,14 @@ enum InfrabaseCommand {
     /// Subcommands to work with WireGuard persistent keepalives
     #[structopt(name = "wg-keepalive")]
     WireguardKeepalive(WireguardKeepaliveCommand),
+
+    #[structopt(name = "wg-privkey")]
+    /// Print a machine's private WireGuard key
+    WireguardPrivkey {
+        /// Machine hostname
+        #[structopt(name = "HOSTNAME")]
+        hostname: String,
+    },
 
     /// Subcommands to work with providers
     #[structopt(name = "provider")]
@@ -758,6 +775,9 @@ fn run() -> Result<()> {
             match cmd {
                 WireguardKeepaliveCommand::List => list_wireguard_keepalives(&connection)?,
             }
+        },
+        InfrabaseCommand::WireguardPrivkey { hostname } => {
+            print_wireguard_privkey(&connection, &hostname)?;
         },
         InfrabaseCommand::List => {
             list_machines(&connection)?;
