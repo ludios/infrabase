@@ -576,6 +576,8 @@ fn print_wg_quick(connection: &PgConnection, for_machine: &str) -> Result<()> {
 
 #[derive(StructOpt, Debug)]
 #[structopt(name = "infrabase")]
+#[structopt(help_message = "Print help information")]
+#[structopt(version_message = "Print version information")]
 /// the machine inventory system
 enum InfrabaseCommand {
     /// Subcommands to work with WireGuard persistent keepalives
