@@ -9,6 +9,7 @@ mod nix;
 
 #[macro_use] extern crate diesel;
 #[macro_use] extern crate itertools;
+#[macro_use] extern crate runtime_fmt;
 
 use std::io;
 use std::iter;
@@ -16,6 +17,7 @@ use std::collections::{HashMap, HashSet};
 use std::{env, path::PathBuf};
 use std::net::{IpAddr, Ipv4Addr};
 use std::io::Write;
+use std::fs::File;
 use std::str;
 use std::string::ToString;
 use std::convert::TryFrom;
@@ -339,6 +341,20 @@ fn print_wireguard_privkey(connection: &PgConnection, hostname: &str) -> Result<
     Ok(())
 }
 
+fn write_wireguard_peers(connection: &PgConnection) -> Result<()> {
+    let path_template = env_var("WIREGUARD_PEERS_PATH_TEMPLATE")?;
+
+    let data = get_machines_and_addresses(&connection)?;
+    for (machine, _addresses) in &data {
+        let hostname = &machine.hostname;
+        let wireguard_ip = &machine.wireguard_ip;
+        let path = rt_format!(path_template, hostname = hostname, wireguard_ip = wireguard_ip).map_err(|_| Error::FormatString)?;
+        let mut file = File::create(path)?;
+        file.write_all(b"")?;
+    }
+    Ok(())
+}
+
 fn get_existing_wireguard_ips(connection: &PgConnection) -> Result<impl Iterator<Item=IpNetwork>> {
     Ok(machines::table
         .load::<Machine>(connection)?
@@ -592,6 +608,10 @@ enum InfrabaseCommand {
         hostname: String,
     },
 
+    #[structopt(name = "write-wg-peers")]
+    /// Write out all WireGuard peers files used for NixOS configuration
+    WriteWireguardPeers,
+
     /// Subcommands to work with providers
     #[structopt(name = "provider")]
     Provider(ProviderCommand),
@@ -780,6 +800,9 @@ fn run() -> Result<()> {
         },
         InfrabaseCommand::WireguardPrivkey { hostname } => {
             print_wireguard_privkey(&connection, &hostname)?;
+        },
+        InfrabaseCommand::WriteWireguardPeers => {
+            write_wireguard_peers(&connection)?;
         },
         InfrabaseCommand::List => {
             list_machines(&connection)?;
