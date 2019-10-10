@@ -19,8 +19,10 @@ env_logger = "0.7.0"
 indoc = { version = "0.3.3", features = ["unstable"] }
 itertools = "0.8.0"
 # Upstream stopped development
-natural_sort = { git = "https://github.com/ludios/natural-sort-rs" }
+natural_sort = { git = "https://github.com/ludios/natural-sort-rs", rev = "d784c63b299ff1b6ea346a2536fadff22c73fc78" }
 tabwriter = "1.1.0"
 bstr = "0.2.8"
 termcolor = "1.0.5"
 runtime-fmt = "0.4.1"
+# New unreleased changes
+salsa = { git = "https://github.com/salsa-rs/salsa", rev = "e1f6572a007d6733be4a52eabd0e94bcef435415" }

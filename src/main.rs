@@ -3,6 +3,7 @@
 
 pub mod schema;
 pub mod models;
+mod data;
 mod wireguard;
 mod nix;
 #[macro_use] mod macros;
@@ -13,7 +14,7 @@ mod nix;
 
 use std::io;
 use std::iter;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::{env, path::PathBuf};
 use std::net::{IpAddr, Ipv4Addr};
 use std::io::Write;
@@ -28,13 +29,12 @@ use dotenv;
 use snafu::{ensure, ResultExt, Snafu, Backtrace, ErrorCompat};
 use structopt::StructOpt;
 use indoc::indoc;
-use natural_sort::HumanStr;
 use ipnetwork::IpNetwork;
 use itertools::Itertools;
 
 use nix::ToNix;
-use schema::{machines, machine_addresses, network_links, providers, wireguard_keepalives};
-use models::{Machine, NewMachine, MachineAddress, NetworkLink, Provider, WireguardKeepalive};
+use schema::{machines, machine_addresses, providers, wireguard_keepalives};
+use models::{Machine, NewMachine, MachineAddress, Provider, WireguardKeepalive};
 
 #[derive(Debug, Snafu)]
 pub(crate) enum Error {
@@ -81,8 +81,6 @@ impl From<diesel::result::Error> for Error {
 
 type Result<T, E = Error> = std::result::Result<T, E>;
 
-type DieselResult<T> = Result<T, diesel::result::Error>;
-
 fn import_env() -> Result<()> {
     let path = dirs::config_dir().unwrap().join("infrabase").join("env");
     dotenv::from_path(&path).context(ReadConfiguration { path })
@@ -91,45 +89,6 @@ fn import_env() -> Result<()> {
 fn establish_connection() -> Result<PgConnection> {
     let database_url = env_var("DATABASE_URL")?;
     Ok(PgConnection::establish(&database_url).context(DieselConnection)?)
-}
-
-/// A map of (network, other_network) -> priority
-type NetworkLinksPriorityMap = HashMap<(String, String), i32>;
-
-/// A map of (source_machine, target_machine) -> interval
-type WireguardKeepaliveIntervalMap = HashMap<(String, String), i32>;
-
-fn get_network_links_priority_map(connection: &PgConnection) -> DieselResult<NetworkLinksPriorityMap> {
-    let map = network_links::table
-        .load::<NetworkLink>(connection)?
-        .into_iter()
-        .map(|row| ((row.name, row.other_network), row.priority))
-        .collect::<HashMap<_, _>>();
-    Ok(map)
-}
-
-fn get_wireguard_keepalive_map(connection: &PgConnection) -> DieselResult<WireguardKeepaliveIntervalMap> {
-    let map = wireguard_keepalives::table
-        .load::<WireguardKeepalive>(connection)?
-        .into_iter()
-        .map(|row| ((row.source_machine, row.target_machine), row.interval_sec))
-        .collect::<HashMap<_, _>>();
-    Ok(map)
-}
-
-type MachinesAndAddresses = Vec<(Machine, Vec<MachineAddress>)>;
-
-fn get_machines_and_addresses(connection: &PgConnection) -> DieselResult<MachinesAndAddresses> {
-    connection.transaction::<_, _, _>(|| {
-        let machines = machines::table
-            .load::<Machine>(connection)?;
-
-        let addresses = MachineAddress::belonging_to(&machines)
-            .load::<MachineAddress>(connection)?
-            .grouped_by(&machines);
-
-        Ok(machines.into_iter().zip(addresses).collect::<Vec<_>>())
-    })
 }
 
 fn format_port(port: Option<i32>) -> String {
@@ -174,9 +133,8 @@ fn write_column_names(tw: &mut TabWriter<Vec<u8>>, headers: Vec<&str>) -> Result
     Ok(())
 }
 
-fn list_providers(connection: &PgConnection) -> Result<()> {
-    let providers = providers::table
-        .load::<Provider>(connection)?;
+fn list_providers(db: &MachineData) -> Result<()> {
+    let providers = db.data().providers;
 
     let mut tw = TabWriter::new(vec![]);
     write_column_names(&mut tw, vec!["ID", "NAME", "EMAIL"])?;
@@ -190,9 +148,8 @@ fn list_providers(connection: &PgConnection) -> Result<()> {
     print_tabwriter(tw)
 }
 
-fn list_wireguard_keepalives(connection: &PgConnection) -> Result<()> {
-    let keepalives = wireguard_keepalives::table
-        .load::<WireguardKeepalive>(connection)?;
+fn list_wireguard_keepalives(db: &MachineData) -> Result<()> {
+    let keepalives = db.data().wireguard_keepalive_interval_map;
 
     let mut tw = TabWriter::new(vec![]);
     write_column_names(&mut tw, vec!["SOURCE", "TARGET", "INTERVAL"])?;
@@ -244,17 +201,8 @@ fn remove_address(connection: &PgConnection, hostname: &str, network: &str, addr
     Ok(())
 }
 
-fn list_addresses(connection: &PgConnection) -> Result<()> {
-    let mut addresses = machine_addresses::table
-        .load::<MachineAddress>(connection)?;
-
-    // natural_sort refuses to compare string segments with integer segments,
-    // so if returns None, fall back to String cmp.
-    addresses.sort_unstable_by(|a1, a2| {
-        HumanStr::new(&a1.hostname)
-            .partial_cmp(&HumanStr::new(&a2.hostname))
-            .unwrap_or_else(|| a1.hostname.cmp(&a2.hostname))
-    });
+fn list_addresses(db: &MachineData) -> Result<()> {
+    let addresses = db.data().addresses;
 
     let mut tw = TabWriter::new(vec![]);
     write_column_names(&mut tw, vec!["HOSTNAME", "NETWORK", "ADDRESS", "SSH", "WG"])?;
@@ -270,19 +218,10 @@ fn list_addresses(connection: &PgConnection) -> Result<()> {
     print_tabwriter(tw)
 }
 
-fn sort_machines_and_addresses(data: &mut MachinesAndAddresses) {
-    // natural_sort refuses to compare string segments with integer segments,
-    // so if returns None, fall back to String cmp.
-    data.sort_unstable_by(|(m1, _), (m2, _)| {
-        HumanStr::new(&m1.hostname)
-            .partial_cmp(&HumanStr::new(&m2.hostname))
-            .unwrap_or_else(|| m1.hostname.cmp(&m2.hostname))
-    });
-}
 
-fn list_machines(connection: &PgConnection) -> Result<()> {
-    let mut data = get_machines_and_addresses(&connection)?;
-    sort_machines_and_addresses(&mut data);
+
+fn list_machines(db: &MachineData) -> Result<()> {
+    let mut data = db.data().machines_and_addresses;
     let mut tw = TabWriter::new(vec![]);
     write_column_names(&mut tw, vec!["HOSTNAME", "WIREGUARD", "OWNER", "PROV", "REFERENCE", "ADDRESSES"])?;
     for (machine, addresses) in &data {
@@ -309,9 +248,8 @@ fn format_nix_address(address: &MachineAddress) -> String {
     )
 }
 
-fn nix_data(connection: &PgConnection) -> Result<()> {
-    let mut data = get_machines_and_addresses(&connection)?;
-    sort_machines_and_addresses(&mut data);
+fn nix_data(db: &MachineData) -> Result<()> {
+    let mut data = db.data().machines_and_addresses;
 
     println!("{{");
     let mut tw = TabWriter::new(vec![]).padding(1);
@@ -332,7 +270,7 @@ fn nix_data(connection: &PgConnection) -> Result<()> {
     Ok(())
 }
 
-fn print_wireguard_privkey(connection: &PgConnection, hostname: &str) -> Result<()> {
+fn print_wireguard_privkey(db: &MachineData, hostname: &str) -> Result<()> {
     let machine = machines::table
         .find(hostname)
         .first::<Machine>(connection)?;
@@ -350,7 +288,8 @@ fn write_wireguard_peers(connection: &PgConnection) -> Result<()> {
         let wireguard_ip = &machine.wireguard_ip;
         let path = rt_format!(path_template, hostname = hostname, wireguard_ip = wireguard_ip).map_err(|_| Error::FormatString)?;
         let mut file = File::create(path)?;
-        file.write_all(b"")?;
+        file.write_all(b"{")?;
+        file.write_all(b"}")?;
     }
     Ok(())
 }
@@ -523,6 +462,18 @@ fn print_ssh_config(connection: &PgConnection, for_machine: &str) -> Result<()> 
         }
     }
     Ok(())
+}
+
+struct WireguardPeer {
+    hostname: String,
+    wireguard_pubkey: String,
+    wireguard_ip: Option<IpNetwork>,
+    endpoint: Option<(IpNetwork, u16)>,
+    keepalive: Option<i32>,
+}
+
+fn get_wireguard_peers() -> Vec<WireguardPeer> {
+    vec![]
 }
 
 fn print_wg_quick(connection: &PgConnection, for_machine: &str) -> Result<()> {
