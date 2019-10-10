@@ -2,7 +2,7 @@ use ipnetwork::IpNetwork;
 use chrono::{DateTime, Utc};
 use crate::schema::*;
 
-#[derive(Identifiable, Queryable, Debug, Clone, PartialEq, Eq)]
+#[derive(Identifiable, Queryable, Debug)]
 #[primary_key(hostname)]
 #[table_name = "machines"]
 pub struct Machine {
@@ -19,7 +19,7 @@ pub struct Machine {
     pub provider_reference: Option<String>,
 }
 
-#[derive(Insertable, Debug, Clone, PartialEq, Eq)]
+#[derive(Insertable, Debug)]
 #[table_name = "machines"]
 pub struct NewMachine {
     pub hostname: String,
@@ -34,7 +34,7 @@ pub struct NewMachine {
     pub provider_reference: Option<String>,
 }
 
-#[derive(Identifiable, Insertable, Queryable, Associations, Debug, Clone, PartialEq, Eq)]
+#[derive(Identifiable, Insertable, Queryable, Associations, Debug)]
 #[primary_key(hostname, network, address)]
 #[belongs_to(Machine, foreign_key = "hostname")]
 #[table_name = "machine_addresses"]
@@ -46,7 +46,7 @@ pub struct MachineAddress {
     pub wireguard_port: Option<i32>,
 }
 
-#[derive(Identifiable, Insertable, Queryable, Associations, Debug, Clone, PartialEq, Eq)]
+#[derive(Identifiable, Insertable, Queryable, Associations, Debug)]
 #[primary_key(source_machine, target_machine)]
 #[belongs_to(Machine, foreign_key = "source_machine")]
 #[table_name = "wireguard_keepalives"]
@@ -56,14 +56,14 @@ pub struct WireguardKeepalive {
     pub interval_sec: i32,
 }
 
-#[derive(Identifiable, Queryable, Debug, Clone, PartialEq, Eq)]
+#[derive(Identifiable, Queryable, Debug)]
 #[primary_key(name)]
 #[table_name = "networks"]
 pub struct Network {
     pub name: String,
 }
 
-#[derive(Identifiable, Queryable, Debug, Clone, PartialEq, Eq)]
+#[derive(Identifiable, Queryable, Debug)]
 #[primary_key(name, other_network, priority)]
 #[table_name = "networks"]
 pub struct NetworkLink {
@@ -72,7 +72,7 @@ pub struct NetworkLink {
     pub priority: i32,
 }
 
-#[derive(Identifiable, Queryable, Debug, Clone, PartialEq, Eq)]
+#[derive(Identifiable, Queryable, Debug)]
 #[table_name = "providers"]
 pub struct Provider {
     pub id: i32,
