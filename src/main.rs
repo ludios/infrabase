@@ -613,13 +613,14 @@ fn print_wg_quick(connection: &PgConnection, for_machine: &str) -> Result<()> {
 
 /// Write a .nix file for each machine listing its WireGuard peers
 fn write_wireguard_peers(connection: &PgConnection) -> Result<()> {
-    let (data, network_links_priority_map, keepalives_map) = connection.transaction::<_, Error, _>(|| {
+    let (mut data, network_links_priority_map, keepalives_map) = connection.transaction::<_, Error, _>(|| {
         Ok((
             get_machines_and_addresses(&connection)?,
             get_network_links_priority_map(&connection)?,
             get_wireguard_keepalive_map(connection)?,
         ))
     })?;
+    sort_machines_and_addresses(&mut data);
 
     let path_template = env_var("WIREGUARD_PEERS_PATH_TEMPLATE")?;
 
@@ -638,7 +639,7 @@ fn write_wireguard_peers(connection: &PgConnection) -> Result<()> {
                 Some(interval) => format!("persistentKeepalive = {}; ", interval),
                 None => "".to_string()
             };
-            writeln!(file, "  {{ allowedIPs = [ {} ]; publicKey = {}; {}{}}}", peer.wireguard_ip.to_nix(), peer.wireguard_pubkey.to_nix(), maybe_endpoint, maybe_keepalive)?;
+            writeln!(file, "  {{ allowedIPs = [ {} ]; publicKey = {}; {}{}}} # {}", peer.wireguard_ip.to_nix(), peer.wireguard_pubkey.to_nix(), maybe_endpoint, maybe_keepalive, peer.hostname)?;
         }
         file.write_all(b"]\n")?;
     }
