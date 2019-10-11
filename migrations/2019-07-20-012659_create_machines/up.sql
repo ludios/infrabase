@@ -1,5 +1,5 @@
 CREATE DOMAIN hostname       AS varchar(32)  CHECK (VALUE ~ '\A[-_a-z0-9]+\Z');
-CREATE DOMAIN netname        AS varchar(32)  CHECK (VALUE ~ '\A[-_a-z0-9]+\Z');
+CREATE DOMAIN netname        AS varchar(32)  CHECK (VALUE ~ '\A(NONE|[-_a-z0-9]+)\Z');
 CREATE DOMAIN port           AS integer      CHECK (VALUE > 0 AND VALUE <= 65536);
 CREATE DOMAIN wireguard_key  AS varchar(44)  CHECK (VALUE ~ '\A[+/A-Za-z0-9]{43}=\Z');
  -- Match default /etc/adduser.conf NAME_REGEX
@@ -7,6 +7,7 @@ CREATE DOMAIN username       AS varchar(32)  CHECK (VALUE ~ '\A[a-z][-a-z0-9_]{1
 CREATE DOMAIN email          AS varchar(254) CHECK (VALUE ~ '\A.+@.+\Z');
 CREATE DOMAIN owner          AS varchar(32);
 
+-- INSERT name='NONE' to support machines that have no addresses in machine_addresses
 CREATE TABLE networks (
     name  netname NOT NULL PRIMARY KEY
 );
@@ -15,6 +16,9 @@ CREATE TABLE networks (
 -- Network must also have a self-link if machines on the network can reach other addresses on the network
 --
 -- priority decides which endpoint should be used when there are multiple candidates
+--
+-- INSERT (name='NONE', other_network='internet', priority=...) to indicate that machine
+-- without any addresses in machine_addresses can reach machines on network 'internet'.
 --
 -- (internet,  internet,   0)
 -- (homelan,   homelan,   -1) <- if machine on homelan reaching another machine on homelan, prefer this over (internet, internet) or (homelan, internet)

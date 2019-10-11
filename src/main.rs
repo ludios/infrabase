@@ -451,7 +451,11 @@ fn get_source_networks(data: &MachinesAndAddresses, for_machine: &str) -> Result
     let source_machine = data.iter().find(|(machine, _)| machine.hostname == for_machine);
     ensure!(source_machine.is_some(), NoSuchMachine { hostname: for_machine });
     let addresses = &source_machine.unwrap().1;
-    Ok(addresses.iter().map(|a| a.network.clone()).collect::<Vec<_>>())
+    let mut networks = addresses.iter().map(|a| a.network.clone()).collect::<Vec<_>>();
+    if networks.is_empty() {
+        networks.push("NONE".to_string());
+    }
+    Ok(networks)
 }
 
 /// Return a Vec of (source_network, dest_network) pairs appropriate for
