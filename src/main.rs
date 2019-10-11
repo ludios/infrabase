@@ -58,6 +58,8 @@ pub(crate) enum Error {
     NoWireguardAddressAvailable,
     #[snafu(display("Machine {} does not have WireGuard", hostname))]
     MachineHasNoWireguard { hostname: String },
+    #[snafu(display("Port {} out of expected range 0-65535", port))]
+    PortOutOfRange { port: i32, source: std::num::TryFromIntError },
     NonZeroExit,
     NoStdin,
     FormatString,
@@ -525,6 +527,58 @@ fn print_ssh_config(connection: &PgConnection, for_machine: &str) -> Result<()> 
     Ok(())
 }
 
+struct WireguardPeer {
+    hostname: String,
+    wireguard_pubkey: String,
+    wireguard_ip: IpNetwork,
+    endpoint: Option<(IpAddr, u16)>,
+    keepalive: Option<i32>,
+}
+
+#[allow(clippy::ptr_arg)]
+fn get_wireguard_peers(
+    data: &MachinesAndAddresses,
+    network_links_priority_map: &NetworkLinksPriorityMap,
+    keepalives_map: &WireguardKeepaliveIntervalMap,
+    for_machine: &str,
+) -> Result<Vec<WireguardPeer>> {
+    let source_networks = get_source_networks(&data, for_machine)?;
+
+    let mut peers = vec![];
+    for (machine, addresses) in data.iter() {
+        if machine.hostname == for_machine {
+            // We don't need a [Peer] for ourselves
+            continue;
+        }
+        let network_to_network = get_network_to_network(&network_links_priority_map, &source_networks, addresses);
+        let endpoint = match network_to_network.get(0) {
+            Some((_, dest_network)) => {
+                let desired_address = addresses.iter().find(|a| a.network == **dest_network);
+                match desired_address {
+                    Some(MachineAddress { address, wireguard_port: Some(port), .. }) => {
+                        Some((address.ip(), u16::try_from(*port).context(PortOutOfRange { port: *port })?))
+                    },
+                    _ => None,
+                }
+            },
+            None => None,
+        };
+
+        // If we have a wireguard peer
+        if let (Some(wireguard_ip), Some(wireguard_pubkey)) = (machine.wireguard_ip, &machine.wireguard_pubkey) {
+            let keepalive = keepalives_map.get(&(for_machine.to_string(), machine.hostname.to_string())).copied();
+            peers.push(WireguardPeer {
+                hostname: machine.hostname.clone(),
+                wireguard_pubkey: wireguard_pubkey.clone(),
+                wireguard_ip,
+                endpoint,
+                keepalive,
+            });
+        }
+    }
+    Ok(peers)
+}
+
 fn print_wg_quick(connection: &PgConnection, for_machine: &str) -> Result<()> {
     let (data, network_links_priority_map, keepalives_map) = connection.transaction::<_, Error, _>(|| {
         Ok((
@@ -533,7 +587,6 @@ fn print_wg_quick(connection: &PgConnection, for_machine: &str) -> Result<()> {
             get_wireguard_keepalive_map(connection)?,
         ))
     })?;
-    let source_networks = get_source_networks(&data, for_machine)?;
 
     let (my_machine, _) = data.iter().find(|(machine, _)| machine.hostname == for_machine).unwrap();
     ensure!(my_machine.wireguard_ip.is_some(), MachineHasNoWireguard { hostname: for_machine });
@@ -547,45 +600,24 @@ fn print_wg_quick(connection: &PgConnection, for_machine: &str) -> Result<()> {
         ListenPort = {}
     "), for_machine, my_machine.wireguard_ip.unwrap().ip(), my_machine.wireguard_privkey.as_ref().unwrap(), my_machine.wireguard_port.unwrap());
 
-    for (machine, addresses) in &data {
-        if machine.hostname == for_machine {
-            // We don't need a [Peer] for ourselves
-            continue;
-        }
-        let network_to_network = get_network_to_network(&network_links_priority_map, &source_networks, addresses);
-        let endpoint = match network_to_network.get(0) {
-            Some((_, dest_network)) => {
-                let desired_address = addresses.iter().find(|a| a.network == **dest_network);
-                match desired_address {
-                    Some(MachineAddress { address, wireguard_port: Some(port), .. }) => {
-                        Some((address.ip(), port))
-                    },
-                    _ => None,
-                }
-            },
-            None => None,
+    for peer in get_wireguard_peers(&data, &network_links_priority_map, &keepalives_map, for_machine)?.iter() {
+        // If we have an endpoint for the wireguard peer
+        let maybe_endpoint = match peer.endpoint {
+            Some((address, port)) => format!("Endpoint = {}:{}\n", address, port),
+            None => "".to_string(),
         };
-
-        // If we have a wireguard peer
-        if let (Some(wireguard_ip), Some(wireguard_pubkey)) = (machine.wireguard_ip, &machine.wireguard_pubkey) {
-            // If we have an endpoint for the wireguard peer
-            let maybe_endpoint = match endpoint {
-                Some((address, port)) => format!("Endpoint = {}:{}\n", address, port),
-                None => "".to_string(),
-            };
-            let maybe_keepalive = match keepalives_map.get(&(my_machine.hostname.to_string(), machine.hostname.to_string())) {
-                Some(interval) => format!("PersistentKeepalive = {}\n", interval),
-                None => "".to_string()
-            };
-            println!(indoc!("
-                # {}
-                [Peer]
-                PublicKey = {}
-                AllowedIPs = {}
-                {}\
-                {}\
-            "), machine.hostname, wireguard_pubkey, wireguard_ip, maybe_endpoint, maybe_keepalive);
-        }
+        let maybe_keepalive = match peer.keepalive {
+            Some(interval) => format!("PersistentKeepalive = {}\n", interval),
+            None => "".to_string()
+        };
+        println!(indoc!("
+            # {}
+            [Peer]
+            PublicKey = {}
+            AllowedIPs = {}
+            {}\
+            {}\
+        "), peer.hostname, peer.wireguard_pubkey, peer.wireguard_ip, maybe_endpoint, maybe_keepalive);
     }
     Ok(())
 }
