@@ -343,20 +343,6 @@ fn print_wireguard_privkey(connection: &PgConnection, hostname: &str) -> Result<
     Ok(())
 }
 
-fn write_wireguard_peers(connection: &PgConnection) -> Result<()> {
-    let path_template = env_var("WIREGUARD_PEERS_PATH_TEMPLATE")?;
-
-    let data = get_machines_and_addresses(&connection)?;
-    for (machine, _addresses) in &data {
-        let hostname = &machine.hostname;
-        let wireguard_ip = &machine.wireguard_ip;
-        let path = rt_format!(path_template, hostname = hostname, wireguard_ip = wireguard_ip).map_err(|_| Error::FormatString)?;
-        let mut file = File::create(path)?;
-        file.write_all(b"")?;
-    }
-    Ok(())
-}
-
 fn get_existing_wireguard_ips(connection: &PgConnection) -> Result<impl Iterator<Item=IpNetwork>> {
     Ok(machines::table
         .load::<Machine>(connection)?
@@ -601,7 +587,6 @@ fn print_wg_quick(connection: &PgConnection, for_machine: &str) -> Result<()> {
     "), for_machine, my_machine.wireguard_ip.unwrap().ip(), my_machine.wireguard_privkey.as_ref().unwrap(), my_machine.wireguard_port.unwrap());
 
     for peer in get_wireguard_peers(&data, &network_links_priority_map, &keepalives_map, for_machine)?.iter() {
-        // If we have an endpoint for the wireguard peer
         let maybe_endpoint = match peer.endpoint {
             Some((address, port)) => format!("Endpoint = {}:{}\n", address, port),
             None => "".to_string(),
@@ -618,6 +603,40 @@ fn print_wg_quick(connection: &PgConnection, for_machine: &str) -> Result<()> {
             {}\
             {}\
         "), peer.hostname, peer.wireguard_pubkey, peer.wireguard_ip, maybe_endpoint, maybe_keepalive);
+    }
+    Ok(())
+}
+
+/// Write a .nix file for each machine listing its WireGuard peers
+fn write_wireguard_peers(connection: &PgConnection) -> Result<()> {
+    let (data, network_links_priority_map, keepalives_map) = connection.transaction::<_, Error, _>(|| {
+        Ok((
+            get_machines_and_addresses(&connection)?,
+            get_network_links_priority_map(&connection)?,
+            get_wireguard_keepalive_map(connection)?,
+        ))
+    })?;
+
+    let path_template = env_var("WIREGUARD_PEERS_PATH_TEMPLATE")?;
+
+    for (machine, _addresses) in &data {
+        let hostname = &machine.hostname;
+        let wireguard_ip = &machine.wireguard_ip;
+        let path = rt_format!(path_template, hostname = hostname, wireguard_ip = wireguard_ip).map_err(|_| Error::FormatString)?;
+        let mut file = File::create(path)?;
+        file.write_all(b"[\n")?;
+        for peer in get_wireguard_peers(&data, &network_links_priority_map, &keepalives_map, hostname)?.iter() {
+            let maybe_endpoint = match peer.endpoint {
+                Some((address, port)) => format!("endpoint = \"{}:{}\"; ", address, port),
+                None => "".to_string(),
+            };
+            let maybe_keepalive = match peer.keepalive {
+                Some(interval) => format!("persistentKeepalive = {}; ", interval),
+                None => "".to_string()
+            };
+            writeln!(file, "  {{ allowedIPs = [ {} ]; publicKey = {}; {}{}}}", peer.wireguard_ip.to_nix(), peer.wireguard_pubkey.to_nix(), maybe_endpoint, maybe_keepalive)?;
+        }
+        file.write_all(b"]\n")?;
     }
     Ok(())
 }
