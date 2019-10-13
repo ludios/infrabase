@@ -21,7 +21,7 @@ fn run(cmd: &str, args: &[&str], input: Option<&[u8]>) -> Result<Vec<u8>, Error>
         return Err(Error::NonZeroExit);
     }
 
-    Ok(output.stdout.clone())
+    Ok(output.stdout)
 }
 
 pub(crate) struct Keypair {
