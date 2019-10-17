@@ -43,3 +43,39 @@ pub(crate) fn generate_keypair() -> Result<Keypair, Error> {
 
     Ok(Keypair { privkey, pubkey })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::chomp_newline;
+    use super::generate_keypair;
+
+    /// Does not chomp anything if there is no trailing newline
+    #[test]
+    fn test_chomp_newline_no_change() {
+        for string in [b"hello\nworld".to_vec(), b" ".to_vec(), b"".to_vec()].iter() {
+            let mut vec = string.clone();
+            chomp_newline(&mut vec);
+            assert_eq!(vec, *string);
+        }
+    }
+
+    /// Chomps just one trailing newline
+    #[test]
+    fn test_chomp_newline() {
+        let mut vec = b"hello\n".to_vec();
+        chomp_newline(&mut vec);
+        assert_eq!(vec, b"hello".to_vec());
+
+        let mut vec = b"\n\n".to_vec();
+        chomp_newline(&mut vec);
+        assert_eq!(vec, b"\n".to_vec());
+    }
+
+    /// Keypair has privkey and pubkey of correct length
+    #[test]
+    fn test_generate_keypair() {
+        let keypair = generate_keypair().unwrap();
+        assert_eq!(keypair.privkey.len(), 44);
+        assert_eq!(keypair.pubkey.len(), 44);
+    }
+}
