@@ -1,7 +1,6 @@
 use std::io::Write;
 use std::process::{Command, Stdio};
 use snafu::ResultExt;
-use bstr::ByteSlice;
 use super::Error;
 use super::Io;
 
@@ -29,12 +28,18 @@ pub(crate) struct Keypair {
     pub pubkey: Vec<u8>,
 }
 
-pub(crate) fn generate_keypair() -> Result<Keypair, Error> {
-    let privkey = run("wg", &["genkey"], None)?;
-    let pubkey = run("wg", &["pubkey"], Some(&privkey))?;
+fn chomp_newline(vec: &mut Vec<u8>) {
+    if let Some(b'\n') = vec.last() {
+        vec.pop();
+    }
+}
 
-    Ok(Keypair {
-        privkey: privkey.trim_end().to_vec(),
-        pubkey: pubkey.trim_end().to_vec()
-    })
+pub(crate) fn generate_keypair() -> Result<Keypair, Error> {
+    let mut privkey = run("wg", &["genkey"], None)?.to_vec();
+    let mut pubkey = run("wg", &["pubkey"], Some(&privkey))?.to_vec();
+
+    chomp_newline(&mut privkey);
+    chomp_newline(&mut pubkey);
+
+    Ok(Keypair { privkey, pubkey })
 }

@@ -9,7 +9,7 @@ edition = "2018"
 [dependencies]
 snafu = "0.5.0"
 diesel = { version = "1.0.0", features = ["postgres", "chrono", "network-address"] }
-ipnetwork = "0.13.0"
+ipnetwork = "0.15.0"
 dirs = "2.0"
 dotenv = "0.9.0"
 chrono = "0.4.7"
@@ -21,6 +21,5 @@ itertools = "0.8.0"
 # Upstream stopped development
 natural_sort = { git = "https://github.com/ludios/natural-sort-rs" }
 tabwriter = "1.1.0"
-bstr = "0.2.8"
 termcolor = "1.0.5"
 runtime-fmt = "0.4.1"
