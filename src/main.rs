@@ -639,7 +639,7 @@ fn write_wireguard_peers(connection: &PgConnection) -> Result<()> {
                 Some(interval) => format!("persistentKeepalive = {}; ", interval),
                 None => "".to_string()
             };
-            writeln!(file, "  {{ allowedIPs = [ {} ]; publicKey = {}; {}{}}} # {}", peer.wireguard_ip.to_nix(), peer.wireguard_pubkey.to_nix(), maybe_endpoint, maybe_keepalive, peer.hostname)?;
+            writeln!(file, "  {{ name = {}; allowedIPs = [ {} ]; publicKey = {}; {}{}}}", peer.hostname.to_nix(), peer.wireguard_ip.to_nix(), peer.wireguard_pubkey.to_nix(), maybe_endpoint, maybe_keepalive)?;
         }
         file.write_all(b"]\n")?;
     }
