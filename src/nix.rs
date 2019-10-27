@@ -15,7 +15,7 @@ impl ToNix for std::net::IpAddr {
     }
 }
 
-impl ToNix for ipnetwork::IpNetwork {
+impl ToNix for std::net::Ipv4Addr {
     fn to_nix(&self) -> String {
         self.to_string().to_nix()
     }

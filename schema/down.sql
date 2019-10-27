@@ -1,3 +1,9 @@
+DROP PROCEDURE remove_machine;
+
+DROP VIEW machines_view;
+
+DROP TABLE ssh_servers;
+DROP TABLE wireguard_interfaces;
 DROP TABLE wireguard_keepalives;
 DROP TABLE machine_addresses;
 DROP TABLE machines;

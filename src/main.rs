@@ -1,13 +1,11 @@
 #![feature(proc_macro_hygiene)]
 #![feature(result_map_or_else)]
 
-pub mod schema;
 pub mod models;
 mod wireguard;
 mod nix;
 #[macro_use] mod macros;
 
-#[macro_use] extern crate diesel;
 #[macro_use] extern crate itertools;
 #[macro_use] extern crate runtime_fmt;
 
@@ -22,19 +20,16 @@ use std::str;
 use std::string::ToString;
 use std::convert::TryFrom;
 use tabwriter::{TabWriter, IntoInnerError};
-use diesel::prelude::*;
-use diesel::pg::PgConnection;
+use postgres::{Client, Transaction, NoTls};
 use dotenv;
 use snafu::{ensure, ResultExt, Snafu, Backtrace, ErrorCompat};
 use structopt::StructOpt;
 use indoc::indoc;
 use natural_sort::HumanStr;
-use ipnetwork::IpNetwork;
 use itertools::Itertools;
 
 use nix::ToNix;
-use schema::{machines, machine_addresses, network_links, providers, wireguard_keepalives};
-use models::{Machine, NewMachine, MachineAddress, NetworkLink, Provider, WireguardKeepalive};
+use models::{Machine, MachineAddress};
 
 #[derive(Debug, Snafu)]
 pub(crate) enum Error {
@@ -43,9 +38,7 @@ pub(crate) enum Error {
     #[snafu(display("Could not find machine {:?} in database", hostname))]
     NoSuchMachine { hostname: String },
     #[snafu(display("Could not find address ({:?}, {:?}, {:?}) in database", hostname, network, address))]
-    NoSuchAddress { hostname: String, network: String, address: IpNetwork },
-    Diesel { source: diesel::result::Error },
-    DieselConnection { source: diesel::ConnectionError },
+    NoSuchAddress { hostname: String, network: String, address: IpAddr },
     #[snafu(display("Could not get variable {} from environment", var))]
     Var { source: env::VarError, var: String },
     Io { source: std::io::Error, backtrace: Backtrace },
@@ -60,10 +53,17 @@ pub(crate) enum Error {
     MachineHasNoWireguard { hostname: String },
     #[snafu(display("Port {} out of expected range 0-65535", port))]
     PortOutOfRange { port: i32, source: std::num::TryFromIntError },
+    Postgres { source: tokio_postgres::error::Error },
     NonZeroExit,
     NoStdin,
     FormatString,
     NoParentDirectory,
+}
+
+impl From<tokio_postgres::error::Error> for Error {
+    fn from(source: tokio_postgres::error::Error) -> Self {
+        Error::Postgres { source }
+    }
 }
 
 impl From<io::Error> for Error {
@@ -75,25 +75,20 @@ impl From<io::Error> for Error {
     }
 }
 
-impl From<diesel::result::Error> for Error {
-    fn from(source: diesel::result::Error) -> Self {
-        Error::Diesel { source }
-    }
-}
-
 type Result<T, E = Error> = std::result::Result<T, E>;
-
-type DieselResult<T> = Result<T, diesel::result::Error>;
 
 fn import_env() -> Result<()> {
     let path = dirs::config_dir().unwrap().join("infrabase").join("env");
     dotenv::from_path(&path).context(ReadConfiguration { path })
 }
 
-fn establish_connection() -> Result<PgConnection> {
+fn postgres_client() -> Result<Client> {
     let database_url = env_var("DATABASE_URL")?;
-    Ok(PgConnection::establish(&database_url).context(DieselConnection)?)
+    Ok(Client::connect(&database_url, NoTls)?)
 }
+
+/// A map of hostname -> Machine
+type MachinesMap = HashMap<String, Machine>;
 
 /// A map of (network, other_network) -> priority
 type NetworkLinksPriorityMap = HashMap<(String, String), i32>;
@@ -101,37 +96,73 @@ type NetworkLinksPriorityMap = HashMap<(String, String), i32>;
 /// A map of (source_machine, target_machine) -> interval
 type WireguardKeepaliveIntervalMap = HashMap<(String, String), i32>;
 
-fn get_network_links_priority_map(connection: &PgConnection) -> DieselResult<NetworkLinksPriorityMap> {
-    let map = network_links::table
-        .load::<NetworkLink>(connection)?
+fn get_network_links_priority_map(transaction: &mut Transaction) -> Result<NetworkLinksPriorityMap> {
+    let map = transaction.query("SELECT name, other_network, priority FROM network_links", &[])?
         .into_iter()
-        .map(|row| ((row.name, row.other_network), row.priority))
+        .map(|row| ((row.get(0), row.get(1)), row.get(2)))
         .collect::<HashMap<_, _>>();
     Ok(map)
 }
 
-fn get_wireguard_keepalive_map(connection: &PgConnection) -> DieselResult<WireguardKeepaliveIntervalMap> {
-    let map = wireguard_keepalives::table
-        .load::<WireguardKeepalive>(connection)?
+fn get_wireguard_keepalive_map(transaction: &mut Transaction) -> Result<WireguardKeepaliveIntervalMap> {
+    let map = transaction.query("SELECT source_machine, target_machine, interval_sec FROM wireguard_keepalives", &[])?
         .into_iter()
-        .map(|row| ((row.source_machine, row.target_machine), row.interval_sec))
+        .map(|row| ((row.get(0), row.get(1)), row.get(2)))
         .collect::<HashMap<_, _>>();
     Ok(map)
 }
 
-type MachinesAndAddresses = Vec<(Machine, Vec<MachineAddress>)>;
+/// Get IPv4Addr from IpAddr or panic
+fn get_ipv4addr(ipaddr: IpAddr) -> Ipv4Addr {
+    match ipaddr {
+        IpAddr::V4(ip) => ip,
+        IpAddr::V6(_) => panic!("Got Ipv6Addr: {:?}", ipaddr),
+    }
+}
 
-fn get_machines_and_addresses(connection: &PgConnection) -> DieselResult<MachinesAndAddresses> {
-    connection.transaction::<_, _, _>(|| {
-        let machines = machines::table
-            .load::<Machine>(connection)?;
-
-        let addresses = MachineAddress::belonging_to(&machines)
-            .load::<MachineAddress>(connection)?
-            .grouped_by(&machines);
-
-        Ok(machines.into_iter().zip(addresses).collect::<Vec<_>>())
-    })
+fn get_machines_with_addresses(transaction: &mut Transaction) -> Result<MachinesMap> {
+    let mut machines = HashMap::new();
+    for row in transaction.query(
+        "SELECT hostname, wireguard_ip, wireguard_port, wireguard_privkey, wireguard_pubkey,
+                ssh_port, ssh_user, added_time, owner, provider_id, provider_reference, networks
+         FROM machines_view", &[]
+    )? {
+        let wireguard_ipaddr: Option<IpAddr> = row.get(1);
+        let wireguard_ip = wireguard_ipaddr.map(get_ipv4addr);
+        let machine = Machine {
+            hostname: row.get(0),
+            wireguard_ip,
+            wireguard_port: row.get(2),
+            wireguard_privkey: row.get(3),
+            wireguard_pubkey: row.get(4),
+            ssh_port: row.get(5),
+            ssh_user: row.get(6),
+            added_time: row.get(7),
+            owner: row.get(8),
+            provider_id: row.get(9),
+            provider_reference: row.get(10),
+            networks: row.get(11),
+            addresses: vec![],
+        };
+        machines.insert(machine.hostname.clone(), machine);
+    }
+    for row in transaction.query(
+        "SELECT hostname, network, address, ssh_port, wireguard_port
+         FROM machine_addresses", &[]
+    )? {
+        let address = MachineAddress {
+            hostname: row.get(0),
+            network: row.get(1),
+            address: row.get(2),
+            ssh_port: row.get(3),
+            wireguard_port: row.get(4),
+        };
+        let machine = machines
+            .get_mut(&address.hostname)
+            .expect("Database gave us an address for a machine that doesn't exist");
+        machine.addresses.push(address);
+    }
+    Ok(machines)
 }
 
 fn format_port(port: Option<i32>) -> String {
@@ -141,9 +172,10 @@ fn format_port(port: Option<i32>) -> String {
     }
 }
 
-fn format_wireguard_ip(wireguard_ip: &Option<IpNetwork>) -> String {
+#[allow(clippy::trivially_copy_pass_by_ref)]
+fn format_wireguard_ip(wireguard_ip: &Option<Ipv4Addr>) -> String {
     match wireguard_ip {
-        Some(ipnetwork) => ipnetwork.ip().to_string(),
+        Some(ipaddr) => ipaddr.to_string(),
         None => "-".to_string(),
     }
 }
@@ -176,79 +208,70 @@ fn write_column_names(tw: &mut TabWriter<Vec<u8>>, headers: Vec<&str>) -> Result
     Ok(())
 }
 
-fn list_providers(connection: &PgConnection) -> Result<()> {
-    let providers = providers::table
-        .load::<Provider>(connection)?;
-
+fn list_providers(transaction: &mut Transaction) -> Result<()> {
     let mut tw = TabWriter::new(vec![]);
     write_column_names(&mut tw, vec!["ID", "NAME", "EMAIL"])?;
-    for provider in &providers {
-        writeln!(tw, "{}\t{}\t{}",
-                 provider.id,
-                 provider.name,
-                 provider.email
-        ).context(Io)?;
+    for row in transaction.query("SELECT id, name, email FROM providers", &[])? {
+        let id: i32 = row.get(0);
+        let name: String = row.get(1);
+        let email: String = row.get(2);
+        writeln!(tw, "{}\t{}\t{}", id, name, email).context(Io)?;
     }
     print_tabwriter(tw)
 }
 
-fn list_wireguard_keepalives(connection: &PgConnection) -> Result<()> {
-    let keepalives = wireguard_keepalives::table
-        .load::<WireguardKeepalive>(connection)?;
-
+fn list_wireguard_keepalives(transaction: &mut Transaction) -> Result<()> {
     let mut tw = TabWriter::new(vec![]);
     write_column_names(&mut tw, vec!["SOURCE", "TARGET", "INTERVAL"])?;
-    for keepalive in &keepalives {
-        writeln!(tw, "{}\t{}\t{}",
-                 keepalive.source_machine,
-                 keepalive.target_machine,
-                 keepalive.interval_sec
-        ).context(Io)?;
+    for row in transaction.query("SELECT source_machine, target_machine, interval_sec FROM wireguard_keepalives", &[])? {
+        let source_machine: String = row.get(0);
+        let target_machine: String = row.get(1);
+        let interval_sec: i32 = row.get(2);
+        writeln!(tw, "{}\t{}\t{}", source_machine, target_machine, interval_sec).context(Io)?;
     }
     print_tabwriter(tw)
 }
 
 fn add_address(
-    connection: &PgConnection,
+    mut transaction: Transaction,
     hostname: &str,
     network: &str,
-    address: Ipv4Addr,
+    address: &IpAddr,
     ssh_port: Option<u16>,
     wireguard_port: Option<u16>
 ) -> Result<()> {
     let ssh_port = unwrap_or_else!(ssh_port, env_var("DEFAULT_SSH_PORT")?.parse::<u16>().context(ParseInt { var: "DEFAULT_SSH_PORT" })?);
     let wireguard_port = unwrap_or_else!(wireguard_port, env_var("DEFAULT_WIREGUARD_PORT")?.parse::<u16>().context(ParseInt { var: "DEFAULT_WIREGUARD_PORT" })?);
-    let ipnetwork = IpNetwork::new(IpAddr::V4(address), 32).unwrap();
-    let new_address = MachineAddress {
-        hostname: hostname.into(),
-        network: network.into(),
-        address: ipnetwork,
-        ssh_port: Some(i32::from(ssh_port)),
-        wireguard_port: Some(i32::from(wireguard_port)),
-    };
-
-    diesel::insert_into(machine_addresses::table)
-        .values(&new_address)
-        .execute(connection)?;
-
+    transaction.execute(
+        "INSERT INTO machine_addresses (hostname, network, address, ssh_port, wireguard_port)
+         VALUES ($1::varchar, $2::varchar, $3::inet, $4::integer, $5::integer)",
+        &[&hostname, &network, &address, &i32::from(ssh_port), &i32::from(wireguard_port)],
+    )?;
+    transaction.commit()?;
     Ok(())
 }
 
-fn remove_address(connection: &PgConnection, hostname: &str, network: &str, address: Ipv4Addr) -> Result<()> {
-    let ipnetwork = IpNetwork::new(IpAddr::V4(address), 32).unwrap();
-    let num_deleted = diesel::delete(
-        machine_addresses::table
-            .filter(machine_addresses::hostname.eq(hostname))
-            .filter(machine_addresses::network.eq(network))
-            .filter(machine_addresses::address.eq(ipnetwork))
-    ).execute(connection)?;
-    ensure!(num_deleted == 1, NoSuchAddress { hostname: hostname, network: network, address: ipnetwork });
+fn remove_address(mut transaction: Transaction, hostname: &str, network: &str, address: &IpAddr) -> Result<()> {
+    let num_deleted = transaction.execute(
+        "DELETE FROM machine_addresses WHERE hostname = $1 AND network = $2 AND address = $3",
+        &[&hostname, &network, &address],
+    )?;
+    ensure!(num_deleted == 1, NoSuchAddress { hostname: hostname, network: network, address: *address });
+    transaction.commit()?;
     Ok(())
 }
 
-fn list_addresses(connection: &PgConnection) -> Result<()> {
-    let mut addresses = machine_addresses::table
-        .load::<MachineAddress>(connection)?;
+fn list_addresses(transaction: &mut Transaction) -> Result<()> {
+    let mut addresses = vec![];
+    for row in transaction.query("SELECT hostname, network, address, ssh_port, wireguard_port FROM machine_addresses", &[])? {
+        addresses.push(MachineAddress {
+            hostname: row.get(0),
+            network: row.get(1),
+            address: row.get(2),
+            ssh_port: row.get(3),
+            wireguard_port: row.get(4),
+        });
+    }
 
     // natural_sort refuses to compare string segments with integer segments,
     // so if returns None, fall back to String cmp.
@@ -272,30 +295,36 @@ fn list_addresses(connection: &PgConnection) -> Result<()> {
     print_tabwriter(tw)
 }
 
-fn sort_machines_and_addresses(data: &mut MachinesAndAddresses) {
+/// Convert a MachinesMap to a Vec of &Machine naturally sorted by hostname
+fn get_sorted_machines(machines_map: &MachinesMap) -> Vec<&Machine> {
+    let mut machines = machines_map
+        .iter()
+        .map(|(_, machine)| machine)
+        .collect::<Vec<_>>();
     // natural_sort refuses to compare string segments with integer segments,
     // so if returns None, fall back to String cmp.
-    data.sort_unstable_by(|(m1, _), (m2, _)| {
+    machines.sort_unstable_by(|m1, m2| {
         HumanStr::new(&m1.hostname)
             .partial_cmp(&HumanStr::new(&m2.hostname))
             .unwrap_or_else(|| m1.hostname.cmp(&m2.hostname))
     });
+    machines
 }
 
-fn list_machines(connection: &PgConnection) -> Result<()> {
-    let mut data = get_machines_and_addresses(&connection)?;
-    sort_machines_and_addresses(&mut data);
+fn list_machines(mut transaction: &mut Transaction) -> Result<()> {
+    let machines_map = get_machines_with_addresses(&mut transaction)?;
+    let machines = get_sorted_machines(&machines_map);
     let mut tw = TabWriter::new(vec![]);
     write_column_names(&mut tw, vec!["HOSTNAME", "WIREGUARD", "OWNER", "PROV", "REFERENCE", "ADDRESSES"])?;
-    for (machine, addresses) in &data {
+    for machine in machines.into_iter() {
         writeln!(tw, "{}\t{}\t{}\t{}\t{}\t{}",
                  machine.hostname,
                  format_wireguard_ip(&machine.wireguard_ip),
                  machine.owner,
                  format_provider(machine.provider_id),
                  format_provider_reference(&machine.provider_reference),
-                 addresses.iter().map(|a| {
-                     format!("{}={}", a.network, a.address.ip())
+                 machine.addresses.iter().map(|a| {
+                     format!("{}={}", a.network, a.address)
                  }).join(" ")
         ).context(Io)?;
     }
@@ -305,19 +334,19 @@ fn list_machines(connection: &PgConnection) -> Result<()> {
 fn format_nix_address(address: &MachineAddress) -> String {
     format!("{} = {{ ip = {}; ssh_port = {}; wireguard_port = {}; }}; ",
             address.network,
-            address.address.ip().to_nix(),
+            address.address.to_nix(),
             address.ssh_port.to_nix(),
             address.wireguard_port.to_nix()
     )
 }
 
-fn nix_data(connection: &PgConnection) -> Result<()> {
-    let mut data = get_machines_and_addresses(&connection)?;
-    sort_machines_and_addresses(&mut data);
+fn nix_data(mut transaction: &mut Transaction) -> Result<()> {
+    let machines_map = get_machines_with_addresses(&mut transaction)?;
+    let machines = get_sorted_machines(&machines_map);
 
     println!("{{");
     let mut tw = TabWriter::new(vec![]).padding(1);
-    for (machine, addresses) in &data {
+    for machine in machines.into_iter() {
         writeln!(tw, "  {}\t= {{ owner = {};\twireguard_ip = {};\twireguard_port = {};\tssh_port = {};\tprovider_id = {};\tprovider_reference = {};\taddresses = {{ {}}}; }};",
                  machine.hostname,
                  machine.owner.to_nix(),
@@ -326,7 +355,7 @@ fn nix_data(connection: &PgConnection) -> Result<()> {
                  machine.ssh_port.to_nix(),
                  &machine.provider_id.to_nix(),
                  &machine.provider_reference.to_nix(),
-                 addresses.iter().map(format_nix_address).join("")
+                 machine.addresses.iter().map(format_nix_address).join("")
         ).context(Io)?;
     }
     print_tabwriter(tw)?;
@@ -334,20 +363,22 @@ fn nix_data(connection: &PgConnection) -> Result<()> {
     Ok(())
 }
 
-fn print_wireguard_privkey(connection: &PgConnection, hostname: &str) -> Result<()> {
-    let machine = machines::table
-        .find(hostname)
-        .first::<Machine>(connection)?;
-    ensure!(machine.wireguard_privkey.is_some(), MachineHasNoWireguard { hostname });
-    println!("{}", machine.wireguard_privkey.unwrap());
+fn print_wireguard_privkey(transaction: &mut Transaction, hostname: &str) -> Result<()> {
+    let row = transaction.query_one("SELECT wireguard_privkey FROM wireguard_interfaces WHERE hostname = $1", &[&hostname])?;
+    let privkey: Option<String> = row.get(0);
+    ensure!(privkey.is_some(), MachineHasNoWireguard { hostname });
+    println!("{}", privkey.unwrap());
     Ok(())
 }
 
-fn get_existing_wireguard_ips(connection: &PgConnection) -> Result<impl Iterator<Item=IpNetwork>> {
-    Ok(machines::table
-        .load::<Machine>(connection)?
+fn get_existing_wireguard_ips(transaction: &mut Transaction) -> Result<impl Iterator<Item=Ipv4Addr>> {
+    let iter = transaction.query("SELECT wireguard_ip FROM wireguard_interfaces", &[])?
         .into_iter()
-        .filter_map(|row| row.wireguard_ip))
+        .filter_map(|row| {
+            let wireguard_ipaddr: Option<IpAddr> = row.get(0);
+            wireguard_ipaddr.map(get_ipv4addr)
+        });
+    Ok(iter)
 }
 
 #[allow(clippy::trivially_copy_pass_by_ref)]
@@ -367,13 +398,12 @@ fn increment_ip(ip: &Ipv4Addr) -> Option<Ipv4Addr> {
     Some(Ipv4Addr::new(octets[0], octets[1], octets[2], octets[3]))
 }
 
-fn get_unused_wireguard_ip(connection: &PgConnection, start_ip: Ipv4Addr, end_ip: Ipv4Addr) -> Result<IpNetwork> {
-    let existing = get_existing_wireguard_ips(&connection)?.collect::<HashSet<IpNetwork>>();
+fn get_unused_wireguard_ip(mut transaction: &mut Transaction, start_ip: Ipv4Addr, end_ip: Ipv4Addr) -> Result<Ipv4Addr> {
+    let existing = get_existing_wireguard_ips(&mut transaction)?.collect::<HashSet<Ipv4Addr>>();
     let ip_iter = iter::successors(Some(start_ip), increment_ip);
     for proposed_ip in ip_iter {
-        let ipnetwork = IpNetwork::new(IpAddr::V4(proposed_ip), 32).unwrap();
-        if !existing.contains(&ipnetwork) {
-            return Ok(ipnetwork);
+        if !existing.contains(&proposed_ip) {
+            return Ok(proposed_ip);
         }
         if proposed_ip == end_ip {
             break;
@@ -388,14 +418,14 @@ fn env_var(var: &str) -> Result<String> {
 
 #[allow(clippy::too_many_arguments)]
 fn add_machine(
-    connection: &PgConnection,
+    mut transaction: Transaction,
     hostname: &str,
     owner: Option<String>,
     ssh_port: Option<u16>,
     ssh_user: Option<String>,
     wireguard_ip: Option<Ipv4Addr>,
     wireguard_port: Option<u16>,
-    provider: Option<u32>,
+    provider: Option<i32>,
     provider_reference: Option<String>,
 ) -> Result<()> {
     // Required environmental variables
@@ -408,54 +438,41 @@ fn add_machine(
     let owner          = unwrap_or_else!(owner, env_var("DEFAULT_OWNER")?);
     let provider_id    = ok_or_else!(provider,
         match env_var("DEFAULT_PROVIDER") {
-            Ok(s) => Some(s.parse::<u32>().context(ParseInt { var: "DEFAULT_PROVIDER" })?),
+            Ok(s) => Some(s.parse::<i32>().context(ParseInt { var: "DEFAULT_PROVIDER" })?),
             Err(_) => None,
         }
     );
 
     let wireguard_ip = match wireguard_ip {
-        Some(ip) => IpNetwork::new(IpAddr::V4(ip), 32).unwrap(),
-        None => get_unused_wireguard_ip(&connection, start_ip, end_ip)?,
+        Some(ip) => ip,
+        None => get_unused_wireguard_ip(&mut transaction, start_ip, end_ip)?,
     };
     let keypair = wireguard::generate_keypair()?;
 
-    let machine = NewMachine {
-        hostname: hostname.into(),
-        wireguard_ip: Some(wireguard_ip),
-        wireguard_port: Some(i32::from(wireguard_port)),
-        wireguard_privkey: Some(str::from_utf8(&keypair.privkey).unwrap().to_string()),
-        wireguard_pubkey: Some(str::from_utf8(&keypair.pubkey).unwrap().to_string()),
-        ssh_port: Some(i32::from(ssh_port)),
-        ssh_user: Some(ssh_user),
-        owner,
-        provider_id: provider_id.map(|n| i32::try_from(n).unwrap()),
-        provider_reference,
-    };
-
-    diesel::insert_into(machines::table)
-        .values(&machine)
-        .execute(connection)?;
+    transaction.execute(
+        "INSERT INTO machines (hostname, owner, provider_id, provider_reference)\
+                VALUES ($1::varchar, $2::varchar, $3, $4)",
+        &[&hostname, &owner, &provider_id, &provider_reference]
+    )?;
+    transaction.execute(
+        "INSERT INTO ssh_servers (hostname, ssh_port, ssh_user)\
+                VALUES ($1::varchar, $2::integer, $3::varchar)",
+        &[&hostname, &i32::from(ssh_port), &ssh_user]
+    )?;
+    transaction.execute(
+        "INSERT INTO wireguard_interfaces (hostname, wireguard_ip, wireguard_port, wireguard_privkey, wireguard_pubkey)\
+                VALUES ($1::varchar, $2::inet, $3::integer, $4::varchar, $5::varchar)",
+        &[&hostname, &IpAddr::V4(wireguard_ip), &i32::from(wireguard_port), &str::from_utf8(&keypair.privkey).unwrap(), &str::from_utf8(&keypair.pubkey).unwrap()]
+    )?;
+    transaction.commit()?;
 
     Ok(())
 }
 
-fn remove_machine(connection: &PgConnection, hostname: &str) -> Result<()> {
-    let num_deleted = diesel::delete(machines::table.filter(machines::hostname.eq(hostname)))
-        .execute(connection)?;
-    ensure!(num_deleted == 1, NoSuchMachine { hostname });
+fn remove_machine(mut transaction: Transaction, hostname: &str) -> Result<()> {
+    transaction.execute("call remove_machine($1::varchar)", &[&hostname])?;
+    transaction.commit()?;
     Ok(())
-}
-
-#[allow(clippy::ptr_arg)]
-fn get_source_networks(data: &MachinesAndAddresses, for_machine: &str) -> Result<Vec<String>> {
-    let source_machine = data.iter().find(|(machine, _)| machine.hostname == for_machine);
-    ensure!(source_machine.is_some(), NoSuchMachine { hostname: for_machine });
-    let addresses = &source_machine.unwrap().1;
-    let mut networks = addresses.iter().map(|a| a.network.clone()).collect::<Vec<_>>();
-    if networks.is_empty() {
-        networks.push("NONE".to_string());
-    }
-    Ok(networks)
 }
 
 /// Return a Vec of (source_network, dest_network) pairs appropriate for
@@ -479,29 +496,24 @@ fn get_network_to_network(
     network_to_network
 }
 
-fn print_ssh_config(connection: &PgConnection, for_machine: &str) -> Result<()> {
-    let (mut data, network_links_priority_map) = connection.transaction::<_, Error, _>(|| {
-        Ok((
-            get_machines_and_addresses(&connection)?,
-            get_network_links_priority_map(&connection)?
-        ))
-    })?;
-    sort_machines_and_addresses(&mut data);
-    let source_networks = get_source_networks(&data, for_machine)?;
+fn print_ssh_config(mut transaction: &mut Transaction, for_machine: &str) -> Result<()> {
+    let machines_map = get_machines_with_addresses(&mut transaction)?;
+    let network_links_priority_map = get_network_links_priority_map(&mut transaction)?;
+    let machines = get_sorted_machines(&machines_map);
 
     println!("# infrabase-generated SSH config for {}\n", for_machine);
 
-    for (machine, addresses) in &data {
-        let network_to_network = get_network_to_network(&network_links_priority_map, &source_networks, addresses);
+    for machine in machines.into_iter() {
+        let network_to_network = get_network_to_network(&network_links_priority_map, &machine.networks, &machine.addresses);
         let (address, ssh_port) = match network_to_network.get(0) {
             None => {
                 // We prefer to SSH over the non-WireGuard IP in case WireGuard is down,
                 // but if there is no reachable address, use the WireGuard IP instead.
-                (machine.wireguard_ip.map(|o| o.ip()), machine.ssh_port)
+                (machine.wireguard_ip.map(IpAddr::V4), machine.ssh_port)
             },
             Some((_, dest_network)) => {
-                let desired_address = addresses.iter().find(|a| a.network == **dest_network).unwrap();
-                (Some(desired_address.address.ip()), desired_address.ssh_port)
+                let desired_address = machine.addresses.iter().find(|a| a.network == **dest_network).unwrap();
+                (Some(desired_address.address), desired_address.ssh_port)
             }
         };
 
@@ -520,33 +532,33 @@ fn print_ssh_config(connection: &PgConnection, for_machine: &str) -> Result<()> 
 struct WireguardPeer {
     hostname: String,
     wireguard_pubkey: String,
-    wireguard_ip: IpNetwork,
+    wireguard_ip: Ipv4Addr,
     endpoint: Option<(IpAddr, u16)>,
     keepalive: Option<i32>,
 }
 
+/// Get a list of WireGuard peers for a machine, taking into account the source
+/// and destination networks for each machine-machine pair.
 #[allow(clippy::ptr_arg)]
 fn get_wireguard_peers(
-    data: &MachinesAndAddresses,
+    machines_map: &MachinesMap,
     network_links_priority_map: &NetworkLinksPriorityMap,
     keepalives_map: &WireguardKeepaliveIntervalMap,
     for_machine: &str,
 ) -> Result<Vec<WireguardPeer>> {
-    let source_networks = get_source_networks(&data, for_machine)?;
-
     let mut peers = vec![];
-    for (machine, addresses) in data.iter() {
+    for machine in machines_map.values() {
         if machine.hostname == for_machine {
             // We don't need a [Peer] for ourselves
             continue;
         }
-        let network_to_network = get_network_to_network(&network_links_priority_map, &source_networks, addresses);
+        let network_to_network = get_network_to_network(&network_links_priority_map, &machine.networks, &machine.addresses);
         let endpoint = match network_to_network.get(0) {
             Some((_, dest_network)) => {
-                let desired_address = addresses.iter().find(|a| a.network == **dest_network);
+                let desired_address = machine.addresses.iter().find(|a| a.network == *dest_network);
                 match desired_address {
                     Some(MachineAddress { address, wireguard_port: Some(port), .. }) => {
-                        Some((address.ip(), u16::try_from(*port).context(PortOutOfRange { port: *port })?))
+                        Some((*address, u16::try_from(*port).context(PortOutOfRange { port: *port })?))
                     },
                     _ => None,
                 }
@@ -569,16 +581,23 @@ fn get_wireguard_peers(
     Ok(peers)
 }
 
-fn print_wg_quick(connection: &PgConnection, for_machine: &str) -> Result<()> {
-    let (data, network_links_priority_map, keepalives_map) = connection.transaction::<_, Error, _>(|| {
-        Ok((
-            get_machines_and_addresses(&connection)?,
-            get_network_links_priority_map(&connection)?,
-            get_wireguard_keepalive_map(connection)?,
-        ))
-    })?;
+fn sort_wireguard_peers(peers: &mut Vec<WireguardPeer>) {
+    peers.sort_unstable_by(|p1, p2| {
+        HumanStr::new(&p1.hostname)
+            .partial_cmp(&HumanStr::new(&p2.hostname))
+            .unwrap()
+    });
+}
 
-    let (my_machine, _) = data.iter().find(|(machine, _)| machine.hostname == for_machine).unwrap();
+fn print_wg_quick(mut transaction: &mut Transaction, for_machine: &str) -> Result<()> {
+    let machines_map = get_machines_with_addresses(&mut transaction)?;
+    let network_links_priority_map = get_network_links_priority_map(&mut transaction)?;
+    let keepalives_map = get_wireguard_keepalive_map(&mut transaction)?;
+
+    let my_machine = machines_map.get(for_machine);
+    ensure!(my_machine.is_some(), NoSuchMachine { hostname: for_machine });
+    let my_machine = my_machine.unwrap();
+
     ensure!(my_machine.wireguard_ip.is_some(), MachineHasNoWireguard { hostname: for_machine });
 
     println!(indoc!("
@@ -588,9 +607,11 @@ fn print_wg_quick(connection: &PgConnection, for_machine: &str) -> Result<()> {
         Address = {}/32
         PrivateKey = {}
         ListenPort = {}
-    "), for_machine, my_machine.wireguard_ip.unwrap().ip(), my_machine.wireguard_privkey.as_ref().unwrap(), my_machine.wireguard_port.unwrap());
+    "), for_machine, my_machine.wireguard_ip.unwrap(), my_machine.wireguard_privkey.as_ref().unwrap(), my_machine.wireguard_port.unwrap());
 
-    for peer in get_wireguard_peers(&data, &network_links_priority_map, &keepalives_map, for_machine)?.iter() {
+    let mut peers = get_wireguard_peers(&machines_map, &network_links_priority_map, &keepalives_map, for_machine)?;
+    sort_wireguard_peers(&mut peers);
+    for peer in peers.iter() {
         let maybe_endpoint = match peer.endpoint {
             Some((address, port)) => format!("Endpoint = {}:{}\n", address, port),
             None => "".to_string(),
@@ -612,25 +633,23 @@ fn print_wg_quick(connection: &PgConnection, for_machine: &str) -> Result<()> {
 }
 
 /// Write a .nix file for each machine listing its WireGuard peers
-fn write_wireguard_peers(connection: &PgConnection) -> Result<()> {
-    let (mut data, network_links_priority_map, keepalives_map) = connection.transaction::<_, Error, _>(|| {
-        Ok((
-            get_machines_and_addresses(&connection)?,
-            get_network_links_priority_map(&connection)?,
-            get_wireguard_keepalive_map(connection)?,
-        ))
-    })?;
-    sort_machines_and_addresses(&mut data);
+fn write_wireguard_peers(mut transaction: &mut Transaction) -> Result<()> {
+    let machines_map = get_machines_with_addresses(&mut transaction)?;
+    let network_links_priority_map = get_network_links_priority_map(&mut transaction)?;
+    let keepalives_map = get_wireguard_keepalive_map(&mut transaction)?;
+    let machines = get_sorted_machines(&machines_map);
 
     let path_template = env_var("WIREGUARD_PEERS_PATH_TEMPLATE")?;
 
-    for (machine, _addresses) in &data {
+    for machine in machines.into_iter() {
         let hostname = &machine.hostname;
         let wireguard_ip = &machine.wireguard_ip;
         let path = rt_format!(path_template, hostname = hostname, wireguard_ip = wireguard_ip).map_err(|_| Error::FormatString)?;
         let mut file = File::create(path)?;
         file.write_all(b"[\n")?;
-        for peer in get_wireguard_peers(&data, &network_links_priority_map, &keepalives_map, hostname)?.iter() {
+        let mut peers = get_wireguard_peers(&machines_map, &network_links_priority_map, &keepalives_map, hostname)?;
+        sort_wireguard_peers(&mut peers);
+        for peer in peers.iter() {
             let maybe_endpoint = match peer.endpoint {
                 Some((address, port)) => format!("endpoint = \"{}:{}\"; ", address, port),
                 None => "".to_string(),
@@ -639,7 +658,8 @@ fn write_wireguard_peers(connection: &PgConnection) -> Result<()> {
                 Some(interval) => format!("persistentKeepalive = {}; ", interval),
                 None => "".to_string()
             };
-            writeln!(file, "  {{ name = {}; allowedIPs = [ {} ]; publicKey = {}; {}{}}}", peer.hostname.to_nix(), peer.wireguard_ip.to_nix(), peer.wireguard_pubkey.to_nix(), maybe_endpoint, maybe_keepalive)?;
+            writeln!(file, "  {{ name = {}; allowedIPs = [ {} ]; publicKey = {}; {}{}}}",
+                     peer.hostname.to_nix(), peer.wireguard_ip.to_nix(), peer.wireguard_pubkey.to_nix(), maybe_endpoint, maybe_keepalive)?;
         }
         file.write_all(b"]\n")?;
     }
@@ -726,7 +746,7 @@ enum InfrabaseCommand {
         /// If one is not provided, DEFAULT_OWNER will be used from the environment
         /// if set, otherwise it will be left unset.
         #[structopt(long)]
-        provider: Option<u32>,
+        provider: Option<i32>,
 
         /// Provider reference
         ///
@@ -794,7 +814,7 @@ enum AddressCommand {
 
         /// The address
         #[structopt(name = "ADDRESS")]
-        address: Ipv4Addr,
+        address: IpAddr,
 
         /// SSH port
         ///
@@ -822,61 +842,62 @@ enum AddressCommand {
 
         /// The address
         #[structopt(name = "ADDRESS")]
-        address: Ipv4Addr,
+        address: IpAddr,
     }
 }
 
 fn run() -> Result<()> {
     import_env()?;
     env_logger::init();
-    let connection = establish_connection()?;
+    let mut client = postgres_client()?;
+    let mut transaction = client.transaction()?;
 
     let matches = InfrabaseCommand::from_args();
     match matches {
         InfrabaseCommand::Provider(cmd) => {
             match cmd {
-                ProviderCommand::List => list_providers(&connection)?,
+                ProviderCommand::List => list_providers(&mut transaction)?,
             }
         },
         InfrabaseCommand::Address(cmd) => {
             match cmd {
-                AddressCommand::List => list_addresses(&connection)?,
+                AddressCommand::List => list_addresses(&mut transaction)?,
                 AddressCommand::Add { hostname, network, address, ssh_port, wireguard_port } => {
-                    add_address(&connection, &hostname, &network, address, ssh_port, wireguard_port)?
+                    add_address(transaction, &hostname, &network, &address, ssh_port, wireguard_port)?
                 },
                 AddressCommand::Remove { hostname, network, address } => {
-                    remove_address(&connection, &hostname, &network, address)?
+                    remove_address(transaction, &hostname, &network, &address)?
                 },
             }
         },
         InfrabaseCommand::WireguardKeepalive(cmd) => {
             match cmd {
-                WireguardKeepaliveCommand::List => list_wireguard_keepalives(&connection)?,
+                WireguardKeepaliveCommand::List => list_wireguard_keepalives(&mut transaction)?,
             }
         },
         InfrabaseCommand::WireguardPrivkey { hostname } => {
-            print_wireguard_privkey(&connection, &hostname)?;
+            print_wireguard_privkey(&mut transaction, &hostname)?;
         },
         InfrabaseCommand::WriteWireguardPeers => {
-            write_wireguard_peers(&connection)?;
+            write_wireguard_peers(&mut transaction)?;
         },
         InfrabaseCommand::List => {
-            list_machines(&connection)?;
+            list_machines(&mut transaction)?;
         },
         InfrabaseCommand::NixData => {
-            nix_data(&connection)?;
+            nix_data(&mut transaction)?;
         },
         InfrabaseCommand::Add { hostname, owner, ssh_port, ssh_user, wireguard_ip, wireguard_port, provider, provider_reference } => {
-            add_machine(&connection, &hostname, owner, ssh_port, ssh_user, wireguard_ip, wireguard_port, provider, provider_reference)?;
+            add_machine(transaction, &hostname, owner, ssh_port, ssh_user, wireguard_ip, wireguard_port, provider, provider_reference)?;
         },
         InfrabaseCommand::Remove { hostname } => {
-            remove_machine(&connection, &hostname)?;
+            remove_machine(transaction, &hostname)?;
         },
         InfrabaseCommand::SshConfig { r#for } => {
-            print_ssh_config(&connection, &r#for)?;
+            print_ssh_config(&mut transaction, &r#for)?;
         },
         InfrabaseCommand::WgQuick { r#for } => {
-            print_wg_quick(&connection, &r#for)?;
+            print_wg_quick(&mut transaction, &r#for)?;
         },
     }
     Ok(())
