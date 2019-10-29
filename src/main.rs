@@ -593,10 +593,7 @@ fn print_wg_quick(mut transaction: &mut Transaction, for_machine: &str) -> Resul
     let machines_map = get_machines_with_addresses(&mut transaction)?;
     let network_links_priority_map = get_network_links_priority_map(&mut transaction)?;
     let keepalives_map = get_wireguard_keepalive_map(&mut transaction)?;
-
-    let my_machine = machines_map.get(for_machine);
-    ensure!(my_machine.is_some(), NoSuchMachine { hostname: for_machine });
-    let my_machine = my_machine.unwrap();
+    let my_machine = unwrap_or_else!(machines_map.get(for_machine), NoSuchMachine { hostname: for_machine }.fail()?);
 
     ensure!(my_machine.wireguard_ip.is_some(), MachineHasNoWireguard { hostname: for_machine });
 
