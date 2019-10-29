@@ -364,8 +364,10 @@ fn nix_data(mut transaction: &mut Transaction) -> Result<()> {
 }
 
 fn print_wireguard_privkey(transaction: &mut Transaction, hostname: &str) -> Result<()> {
-    let row = transaction.query_one("SELECT wireguard_privkey FROM wireguard_interfaces WHERE hostname = $1", &[&hostname])?;
-    let privkey: Option<String> = row.get(0);
+    let rows = transaction.query("SELECT hostname, wireguard_privkey FROM machines_view WHERE hostname = $1", &[&hostname])?;
+    ensure!(rows.len() == 1, NoSuchMachine { hostname });
+    let row = &rows[0];
+    let privkey: Option<&str> = row.get(1);
     ensure!(privkey.is_some(), MachineHasNoWireguard { hostname });
     println!("{}", privkey.unwrap());
     Ok(())
