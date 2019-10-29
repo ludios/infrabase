@@ -472,7 +472,7 @@ fn add_machine(
 }
 
 fn remove_machine(mut transaction: Transaction, hostname: &str) -> Result<()> {
-    transaction.execute("call remove_machine($1::varchar)", &[&hostname])?;
+    transaction.execute("call remove_machine($1)", &[&hostname])?;
     transaction.commit()?;
     Ok(())
 }
