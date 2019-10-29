@@ -452,17 +452,17 @@ fn add_machine(
     let keypair = wireguard::generate_keypair()?;
 
     transaction.execute(
-        "INSERT INTO machines (hostname, owner, provider_id, provider_reference)\
+        "INSERT INTO machines (hostname, owner, provider_id, provider_reference)
                 VALUES ($1::varchar, $2::varchar, $3, $4)",
         &[&hostname, &owner, &provider_id, &provider_reference]
     )?;
     transaction.execute(
-        "INSERT INTO ssh_servers (hostname, ssh_port, ssh_user)\
+        "INSERT INTO ssh_servers (hostname, ssh_port, ssh_user)
                 VALUES ($1::varchar, $2::integer, $3::varchar)",
         &[&hostname, &i32::from(ssh_port), &ssh_user]
     )?;
     transaction.execute(
-        "INSERT INTO wireguard_interfaces (hostname, wireguard_ip, wireguard_port, wireguard_privkey, wireguard_pubkey)\
+        "INSERT INTO wireguard_interfaces (hostname, wireguard_ip, wireguard_port, wireguard_privkey, wireguard_pubkey)
                 VALUES ($1::varchar, $2::inet, $3::integer, $4::varchar, $5::varchar)",
         &[&hostname, &IpAddr::V4(wireguard_ip), &i32::from(wireguard_port), &str::from_utf8(&keypair.privkey).unwrap(), &str::from_utf8(&keypair.pubkey).unwrap()]
     )?;
