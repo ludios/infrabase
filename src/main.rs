@@ -433,7 +433,7 @@ fn add_machine(
     // Required environmental variables
     let start_ip       = env_var("WIREGUARD_IP_START")?.parse::<Ipv4Addr>().context(AddrParse { var: "WIREGUARD_IP_START" })?;
     let end_ip         = env_var("WIREGUARD_IP_END")?.parse::<Ipv4Addr>().context(AddrParse { var: "WIREGUARD_IP_END" })?;
-    // Optional environmntal variables
+    // Optional environmental variables
     let ssh_port       = unwrap_or_else!(ssh_port, env_var("DEFAULT_SSH_PORT")?.parse::<u16>().context(ParseInt { var: "DEFAULT_SSH_PORT" })?);
     let ssh_user       = unwrap_or_else!(ssh_user, env_var("DEFAULT_SSH_USER")?);
     let wireguard_port = unwrap_or_else!(wireguard_port, env_var("DEFAULT_WIREGUARD_PORT")?.parse::<u16>().context(ParseInt { var: "DEFAULT_WIREGUARD_PORT" })?);
