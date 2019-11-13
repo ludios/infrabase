@@ -763,7 +763,7 @@ enum InfrabaseCommand {
         hostname: String,
     },
 
-    #[structopt(name = "ssh_config")]
+    #[structopt(name = "ssh-config")]
     /// Prints an ~/.ssh/config that lists all machines
     SshConfig {
         /// Machine to generate SSH config for
@@ -771,7 +771,7 @@ enum InfrabaseCommand {
         r#for: String,
     },
 
-    #[structopt(name = "wg_quick")]
+    #[structopt(name = "wg-quick")]
     /// Output a wg-quick config for a machine
     WgQuick {
         /// Machine to generate wg-quick config for
