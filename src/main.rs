@@ -22,7 +22,7 @@ use std::convert::TryFrom;
 use tabwriter::{TabWriter, IntoInnerError};
 use postgres::{Client, Transaction, NoTls};
 use dotenv;
-use snafu::{ensure, ResultExt, Snafu, Backtrace, ErrorCompat};
+use snafu::{ensure, ResultExt, Snafu, Backtrace, GenerateBacktrace, ErrorCompat};
 use structopt::StructOpt;
 use indoc::indoc;
 use natural_sort::HumanStr;
@@ -41,7 +41,7 @@ pub(crate) enum Error {
     NoSuchAddress { hostname: String, network: String, address: IpAddr },
     #[snafu(display("Could not get variable {} from environment", var))]
     Var { source: env::VarError, var: String },
-    Io { source: std::io::Error, backtrace: Backtrace },
+    Io { source: std::io::Error, backtrace: Option<Backtrace> },
     IntoInner { source: IntoInnerError<TabWriter<Vec<u8>>> },
     #[snafu(display("Could not parse variable {} as integer", var))]
     ParseInt { source: std::num::ParseIntError, var: String },
@@ -70,7 +70,7 @@ impl From<io::Error> for Error {
     fn from(err: io::Error) -> Self {
         Error::Io {
             source: err,
-            backtrace: Backtrace::new(),
+            backtrace: GenerateBacktrace::generate(),
         }
     }
 }
