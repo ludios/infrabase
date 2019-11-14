@@ -551,7 +551,7 @@ fn get_wireguard_peers(
     let mut peers = vec![];
     let source_machine =
         &machines_map.get(for_machine)
-        .expect(&format!("machines_map missing {}", for_machine));
+        .unwrap_or_else(|| panic!("machines_map missing {}", for_machine));
     for machine in machines_map.values() {
         if machine.hostname == for_machine {
             // We don't need a [Peer] for ourselves
