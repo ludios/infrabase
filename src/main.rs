@@ -549,12 +549,15 @@ fn get_wireguard_peers(
     for_machine: &str,
 ) -> Result<Vec<WireguardPeer>> {
     let mut peers = vec![];
+    let source_machine =
+        &machines_map.get(for_machine)
+        .expect(&format!("machines_map missing {}", for_machine));
     for machine in machines_map.values() {
         if machine.hostname == for_machine {
             // We don't need a [Peer] for ourselves
             continue;
         }
-        let network_to_network = get_network_to_network(&network_links_priority_map, &machine.networks, &machine.addresses);
+        let network_to_network = get_network_to_network(&network_links_priority_map, &source_machine.networks, &machine.addresses);
         let endpoint = match network_to_network.get(0) {
             Some((_, dest_network)) => {
                 let desired_address = machine.addresses.iter().find(|a| a.network == *dest_network);
