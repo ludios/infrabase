@@ -34,7 +34,7 @@ use models::{Machine, MachineAddress};
 #[derive(Debug, Snafu)]
 pub(crate) enum Error {
     #[snafu(display("Unable to read configuration from {}: {}", path.display(), source))]
-    ReadConfiguration { source: dotenv::DotenvError, path: PathBuf },
+    ReadConfiguration { source: dotenv::Error, path: PathBuf },
     #[snafu(display("Could not find machine {:?} in database", hostname))]
     NoSuchMachine { hostname: String },
     #[snafu(display("Could not find address ({:?}, {:?}, {:?}) in database", hostname, network, address))]
