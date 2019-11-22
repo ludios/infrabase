@@ -1,5 +1,4 @@
 #![feature(proc_macro_hygiene)]
-#![feature(result_map_or_else)]
 
 mod wireguard;
 mod nix;
