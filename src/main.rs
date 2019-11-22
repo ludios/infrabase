@@ -868,7 +868,7 @@ enum AddressCommand {
     }
 }
 
-fn run() -> Result<()> {
+fn main() -> Result<()> {
     import_env()?;
     env_logger::init();
     let mut client = postgres_client()?;
@@ -923,10 +923,6 @@ fn run() -> Result<()> {
         },
     }
     Ok(())
-}
-
-fn main() -> Result<()> {
-    run()
 }
 
 #[cfg(test)]
