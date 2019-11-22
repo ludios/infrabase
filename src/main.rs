@@ -665,8 +665,10 @@ fn write_wireguard_peers(mut transaction: &mut Transaction) -> Result<()> {
     for machine in machines.into_iter() {
         let hostname = &machine.hostname;
         let wireguard_ip = &machine.wireguard_ip;
-        let path = rt_format!(path_template, hostname = hostname, wireguard_ip = wireguard_ip).unwrap();
-        //             .context("Bad template in WIREGUARD_PEERS_PATH_TEMPLATE")?;
+        let path =
+            // Beware https://github.com/SpaceManiac/runtime-fmt/issues/6
+            rt_format!(path_template, hostname = hostname, wireguard_ip = wireguard_ip)
+            .map_err(|_| anyhow!("Bad template in WIREGUARD_PEERS_PATH_TEMPLATE: allowed tokens are {hostname} and {wireguard_ip}"))?;
         let mut file = File::create(path)?;
         file.write_all(b"[\n")?;
         let mut peers = get_wireguard_peers(&machines_map, &network_links_priority_map, &keepalives_map, hostname)?;
