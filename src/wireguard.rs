@@ -1,25 +1,21 @@
 use std::io::Write;
 use std::process::{Command, Stdio};
-use snafu::ResultExt;
-use super::Error;
-use super::Io;
+use anyhow::{ensure, Result};
 
-fn run(cmd: &str, args: &[&str], input: Option<&[u8]>) -> Result<Vec<u8>, Error> {
+fn run(cmd: &str, args: &[&str], input: Option<&[u8]>) -> Result<Vec<u8>> {
     let mut child = Command::new(cmd)
         .args(args)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .spawn().context(Io)?;
+        .spawn()?;
 
     if let Some(input) = input {
-        let stdin = child.stdin.as_mut().ok_or(Error::NoStdin)?;
-        stdin.write_all(input).context(Io)?;
+        let stdin = child.stdin.as_mut();
+        ensure!(stdin.is_some(), "Could not get stdin for child process");
+        stdin.unwrap().write_all(input)?;
     }
-    let output = child.wait_with_output().context(Io)?;
-    if !output.status.success() {
-        return Err(Error::NonZeroExit);
-    }
-
+    let output = child.wait_with_output()?;
+    ensure!(output.status.success(), "{:?} finished with non-zero exit status {}", cmd, output.status);
     Ok(output.stdout)
 }
 
@@ -34,7 +30,7 @@ fn chomp_newline(vec: &mut Vec<u8>) {
     }
 }
 
-pub(crate) fn generate_keypair() -> Result<Keypair, Error> {
+pub(crate) fn generate_keypair() -> Result<Keypair> {
     let mut privkey = run("wg", &["genkey"], None)?.to_vec();
     let mut pubkey = run("wg", &["pubkey"], Some(&privkey))?.to_vec();
 

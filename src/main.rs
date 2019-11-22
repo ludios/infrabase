@@ -1,7 +1,6 @@
 #![feature(proc_macro_hygiene)]
 #![feature(result_map_or_else)]
 
-pub mod models;
 mod wireguard;
 mod nix;
 #[macro_use] mod macros;
@@ -9,82 +8,62 @@ mod nix;
 #[macro_use] extern crate itertools;
 #[macro_use] extern crate runtime_fmt;
 
-use std::io;
 use std::iter;
 use std::collections::{HashMap, HashSet};
-use std::{env, path::PathBuf};
+use std::env;
 use std::net::{IpAddr, Ipv4Addr};
 use std::io::Write;
 use std::fs::File;
 use std::str;
 use std::string::ToString;
 use std::convert::TryFrom;
-use tabwriter::{TabWriter, IntoInnerError};
+use tabwriter::TabWriter;
 use postgres::{Client, Transaction, NoTls};
 use dotenv;
-use snafu::{ensure, ResultExt, Snafu, Backtrace, GenerateBacktrace, ErrorCompat};
+use anyhow::{ensure, anyhow, bail, Context, Result};
 use structopt::StructOpt;
 use indoc::indoc;
 use natural_sort::HumanStr;
 use itertools::Itertools;
+use chrono::{DateTime, Utc};
 
 use nix::ToNix;
-use models::{Machine, MachineAddress};
-
-#[derive(Debug, Snafu)]
-pub(crate) enum Error {
-    #[snafu(display("Unable to read configuration from {}: {}", path.display(), source))]
-    ReadConfiguration { source: dotenv::Error, path: PathBuf },
-    #[snafu(display("Could not find machine {:?} in database", hostname))]
-    NoSuchMachine { hostname: String },
-    #[snafu(display("Could not find address ({:?}, {:?}, {:?}) in database", hostname, network, address))]
-    NoSuchAddress { hostname: String, network: String, address: IpAddr },
-    #[snafu(display("Could not get variable {} from environment", var))]
-    Var { source: env::VarError, var: String },
-    Io { source: std::io::Error, backtrace: Option<Backtrace> },
-    IntoInner { source: IntoInnerError<TabWriter<Vec<u8>>> },
-    #[snafu(display("Could not parse variable {} as integer", var))]
-    ParseInt { source: std::num::ParseIntError, var: String },
-    #[snafu(display("Could not parse variable {} as IP address", var))]
-    AddrParse { source: std::net::AddrParseError, var: String },
-    #[snafu(display("Could not find an unused WireGuard IP address; check WIREGUARD_IP_START and WIREGUARD_IP_END"))]
-    NoWireguardAddressAvailable,
-    #[snafu(display("Machine {} does not have WireGuard", hostname))]
-    MachineHasNoWireguard { hostname: String },
-    #[snafu(display("Port {} out of expected range 0-65535", port))]
-    PortOutOfRange { port: i32, source: std::num::TryFromIntError },
-    Postgres { source: tokio_postgres::error::Error },
-    NonZeroExit,
-    NoStdin,
-    FormatString,
-    NoParentDirectory,
-}
-
-impl From<tokio_postgres::error::Error> for Error {
-    fn from(source: tokio_postgres::error::Error) -> Self {
-        Error::Postgres { source }
-    }
-}
-
-impl From<io::Error> for Error {
-    fn from(err: io::Error) -> Self {
-        Error::Io {
-            source: err,
-            backtrace: GenerateBacktrace::generate(),
-        }
-    }
-}
-
-type Result<T, E = Error> = std::result::Result<T, E>;
 
 fn import_env() -> Result<()> {
     let path = dirs::config_dir().unwrap().join("infrabase").join("env");
-    dotenv::from_path(&path).context(ReadConfiguration { path })
+    dotenv::from_path(&path)
+        .with_context(|| format!("Unable to read configuration from {:?}", &path))
 }
 
 fn postgres_client() -> Result<Client> {
     let database_url = env_var("DATABASE_URL")?;
     Ok(Client::connect(&database_url, NoTls)?)
+}
+
+#[derive(Debug)]
+pub struct Machine {
+    pub hostname: String,
+    pub wireguard_ip: Option<Ipv4Addr>,
+    pub wireguard_port: Option<i32>,
+    pub wireguard_privkey: Option<String>,
+    pub wireguard_pubkey: Option<String>,
+    pub ssh_port: Option<i32>,
+    pub ssh_user: Option<String>,
+    pub added_time: DateTime<Utc>,
+    pub owner: String,
+    pub provider_id: Option<i32>,
+    pub provider_reference: Option<String>,
+    pub networks: Vec<String>,
+    pub addresses: Vec<MachineAddress>,
+}
+
+#[derive(Debug)]
+pub struct MachineAddress {
+    pub hostname: String,
+    pub network: String,
+    pub address: IpAddr,
+    pub ssh_port: Option<i32>,
+    pub wireguard_port: Option<i32>,
 }
 
 /// A map of hostname -> Machine
@@ -195,16 +174,17 @@ fn format_provider_reference(reference: &Option<String>) -> String {
 }
 
 fn print_tabwriter(tw: TabWriter<Vec<u8>>) -> Result<()> {
-    let bytes = tw.into_inner().context(IntoInner)?;
-    std::io::stdout().write_all(&bytes).context(Io)
+    let bytes = tw.into_inner()?;
+    std::io::stdout().write_all(&bytes)?;
+    Ok(())
 }
 
 /// Write a table header to a TabWriter
 fn write_column_names(tw: &mut TabWriter<Vec<u8>>, headers: Vec<&str>) -> Result<()> {
-    tw.write_all(headers.join("\t").as_bytes()).context(Io)?;
-    tw.write_all("\n".as_bytes()).context(Io)?;
-    tw.write_all(headers.iter().map(|h| str::repeat("-", h.len())).join("\t").as_bytes()).context(Io)?;
-    tw.write_all("\n".as_bytes()).context(Io)?;
+    tw.write_all(headers.join("\t").as_bytes())?;
+    tw.write_all("\n".as_bytes())?;
+    tw.write_all(headers.iter().map(|h| str::repeat("-", h.len())).join("\t").as_bytes())?;
+    tw.write_all("\n".as_bytes())?;
     Ok(())
 }
 
@@ -215,7 +195,7 @@ fn list_providers(transaction: &mut Transaction) -> Result<()> {
         let id: i32 = row.get(0);
         let name: String = row.get(1);
         let email: String = row.get(2);
-        writeln!(tw, "{}\t{}\t{}", id, name, email).context(Io)?;
+        writeln!(tw, "{}\t{}\t{}", id, name, email)?;
     }
     print_tabwriter(tw)
 }
@@ -227,7 +207,7 @@ fn list_wireguard_keepalives(transaction: &mut Transaction) -> Result<()> {
         let source_machine: String = row.get(0);
         let target_machine: String = row.get(1);
         let interval_sec: i32 = row.get(2);
-        writeln!(tw, "{}\t{}\t{}", source_machine, target_machine, interval_sec).context(Io)?;
+        writeln!(tw, "{}\t{}\t{}", source_machine, target_machine, interval_sec)?;
     }
     print_tabwriter(tw)
 }
@@ -240,8 +220,16 @@ fn add_address(
     ssh_port: Option<u16>,
     wireguard_port: Option<u16>
 ) -> Result<()> {
-    let ssh_port = unwrap_or_else!(ssh_port, env_var("DEFAULT_SSH_PORT")?.parse::<u16>().context(ParseInt { var: "DEFAULT_SSH_PORT" })?);
-    let wireguard_port = unwrap_or_else!(wireguard_port, env_var("DEFAULT_WIREGUARD_PORT")?.parse::<u16>().context(ParseInt { var: "DEFAULT_WIREGUARD_PORT" })?);
+    let ssh_port = unwrap_or_else!(
+        ssh_port,
+        env_var("DEFAULT_SSH_PORT")?.parse::<u16>()
+            .context("Could not parse DEFAULT_SSH_PORT as a u16")?
+    );
+    let wireguard_port = unwrap_or_else!(
+        wireguard_port,
+        env_var("DEFAULT_WIREGUARD_PORT")?.parse::<u16>()
+            .context("Could not parse DEFAULT_WIREGUARD_PORT as a u16")?
+    );
     transaction.execute(
         "INSERT INTO machine_addresses (hostname, network, address, ssh_port, wireguard_port)
          VALUES ($1::varchar, $2::varchar, $3::inet, $4::integer, $5::integer)",
@@ -256,7 +244,7 @@ fn remove_address(mut transaction: Transaction, hostname: &str, network: &str, a
         "DELETE FROM machine_addresses WHERE hostname = $1 AND network = $2 AND address = $3",
         &[&hostname, &network, &address],
     )?;
-    ensure!(num_deleted == 1, NoSuchAddress { hostname: hostname, network: network, address: *address });
+    ensure!(num_deleted == 1, "Could not find address ({:?}, {:?}, {:?}) in database", hostname, network, address);
     transaction.commit()?;
     Ok(())
 }
@@ -290,7 +278,7 @@ fn list_addresses(transaction: &mut Transaction) -> Result<()> {
                  address.address,
                  format_port(address.ssh_port),
                  format_port(address.wireguard_port),
-        ).context(Io)?;
+        )?;
     }
     print_tabwriter(tw)
 }
@@ -326,7 +314,7 @@ fn list_machines(mut transaction: &mut Transaction) -> Result<()> {
                  machine.addresses.iter().map(|a| {
                      format!("{}={}", a.network, a.address)
                  }).join(" ")
-        ).context(Io)?;
+        )?;
     }
     print_tabwriter(tw)
 }
@@ -356,7 +344,7 @@ fn nix_data(mut transaction: &mut Transaction) -> Result<()> {
                  &machine.provider_id.to_nix(),
                  &machine.provider_reference.to_nix(),
                  machine.addresses.iter().map(format_nix_address).join("")
-        ).context(Io)?;
+        )?;
     }
     print_tabwriter(tw)?;
     println!("}}");
@@ -365,10 +353,10 @@ fn nix_data(mut transaction: &mut Transaction) -> Result<()> {
 
 fn print_wireguard_privkey(transaction: &mut Transaction, hostname: &str) -> Result<()> {
     let rows = transaction.query("SELECT hostname, wireguard_privkey FROM machines_view WHERE hostname = $1", &[&hostname])?;
-    ensure!(rows.len() == 1, NoSuchMachine { hostname });
+    ensure!(!rows.is_empty(), "Could not find machine {:?} in database", hostname);
     let row = &rows[0];
     let privkey: Option<&str> = row.get(1);
-    ensure!(privkey.is_some(), MachineHasNoWireguard { hostname });
+    ensure!(privkey.is_some(), "Machine {:?} does not have WireGuard IP", hostname);
     println!("{}", privkey.unwrap());
     Ok(())
 }
@@ -400,22 +388,22 @@ fn increment_ip(ip: &Ipv4Addr) -> Option<Ipv4Addr> {
     Some(Ipv4Addr::new(octets[0], octets[1], octets[2], octets[3]))
 }
 
-fn get_unused_wireguard_ip(mut transaction: &mut Transaction, start_ip: Ipv4Addr, end_ip: Ipv4Addr) -> Result<Ipv4Addr> {
+fn get_unused_wireguard_ip(mut transaction: &mut Transaction, start_ip: Ipv4Addr, end_ip: Ipv4Addr) -> Result<Option<Ipv4Addr>> {
     let existing = get_existing_wireguard_ips(&mut transaction)?.collect::<HashSet<Ipv4Addr>>();
     let ip_iter = iter::successors(Some(start_ip), increment_ip);
     for proposed_ip in ip_iter {
         if !existing.contains(&proposed_ip) {
-            return Ok(proposed_ip);
+            return Ok(Some(proposed_ip));
         }
         if proposed_ip == end_ip {
             break;
         }
     }
-    Err(Error::NoWireguardAddressAvailable)
+    Ok(None)
 }
 
 fn env_var(var: &str) -> Result<String> {
-    env::var(var).context(Var { var })
+    env::var(var).with_context(|| anyhow!("Could not get variable {:?} from environment", var))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -431,23 +419,50 @@ fn add_machine(
     provider_reference: Option<String>,
 ) -> Result<()> {
     // Required environmental variables
-    let start_ip       = env_var("WIREGUARD_IP_START")?.parse::<Ipv4Addr>().context(AddrParse { var: "WIREGUARD_IP_START" })?;
-    let end_ip         = env_var("WIREGUARD_IP_END")?.parse::<Ipv4Addr>().context(AddrParse { var: "WIREGUARD_IP_END" })?;
+    let start_ip = env_var("WIREGUARD_IP_START")?.parse::<Ipv4Addr>()
+        .context("Could not parse WIREGUARD_IP_START as an Ipv4Addr")?;
+    let end_ip = env_var("WIREGUARD_IP_END")?.parse::<Ipv4Addr>()
+        .context("Could not parse WIREGUARD_IP_END as an Ipv4Addr")?;
+
     // Optional environmental variables
-    let ssh_port       = unwrap_or_else!(ssh_port, env_var("DEFAULT_SSH_PORT")?.parse::<u16>().context(ParseInt { var: "DEFAULT_SSH_PORT" })?);
-    let ssh_user       = unwrap_or_else!(ssh_user, env_var("DEFAULT_SSH_USER")?);
-    let wireguard_port = unwrap_or_else!(wireguard_port, env_var("DEFAULT_WIREGUARD_PORT")?.parse::<u16>().context(ParseInt { var: "DEFAULT_WIREGUARD_PORT" })?);
-    let owner          = unwrap_or_else!(owner, env_var("DEFAULT_OWNER")?);
-    let provider_id    = ok_or_else!(provider,
+    let ssh_port = unwrap_or_else!(
+        ssh_port,
+        env_var("DEFAULT_SSH_PORT")
+            .context("No SSH user was provided, and could not get variable \"DEFAULT_SSH_PORT\" from environment")?
+            .parse::<u16>()
+            .context("No SSH port was provided, and could not parse DEFAULT_SSH_PORT as a u16")?
+    );
+    let ssh_user = unwrap_or_else!(
+        ssh_user,
+        env_var("DEFAULT_SSH_USER")
+            .context("No SSH user was provided, and could not get variable \"DEFAULT_SSH_USER\" from environment")?
+    );
+    let wireguard_port = unwrap_or_else!(
+        wireguard_port,
+        env_var("DEFAULT_WIREGUARD_PORT")
+            .context("No WireGuard port was provided, and could not get variable \"DEFAULT_WIREGUARD_PORT\" from environment")?
+            .parse::<u16>()
+            .context("No WireGuard port was provided, and could not parse DEFAULT_WIREGUARD_PORT as a u16")?
+    );
+    let owner = unwrap_or_else!(
+        owner,
+        env_var("DEFAULT_OWNER")
+            .context("No owner was provided, and could not get variable \"DEFAULT_OWNER\" from environment")?
+    );
+    let provider_id = ok_or_else!(
+        provider,
         match env_var("DEFAULT_PROVIDER") {
-            Ok(s) => Some(s.parse::<i32>().context(ParseInt { var: "DEFAULT_PROVIDER" })?),
+            Ok(s) => Some(s.parse::<i32>().context("Could not parse DEFAULT_PROVIDER as an i32")?),
             Err(_) => None,
         }
     );
 
     let wireguard_ip = match wireguard_ip {
         Some(ip) => ip,
-        None => get_unused_wireguard_ip(&mut transaction, start_ip, end_ip)?,
+        None => {
+            get_unused_wireguard_ip(&mut transaction, start_ip, end_ip)?
+                .context("Could not find an unused WireGuard IP between WIREGUARD_IP_START and WIREGUARD_IP_END")?
+        }
     };
     let keypair = wireguard::generate_keypair()?;
 
@@ -563,7 +578,8 @@ fn get_wireguard_peers(
                 let desired_address = machine.addresses.iter().find(|a| a.network == *dest_network);
                 match desired_address {
                     Some(MachineAddress { address, wireguard_port: Some(port), .. }) => {
-                        Some((*address, u16::try_from(*port).context(PortOutOfRange { port: *port })?))
+                        Some((*address, u16::try_from(*port)
+                            .with_context(|| anyhow!("Port {} out of expected range 0-65535", *port))?))
                     },
                     _ => None,
                 }
@@ -598,9 +614,12 @@ fn print_wg_quick(mut transaction: &mut Transaction, for_machine: &str) -> Resul
     let machines_map = get_machines_with_addresses(&mut transaction)?;
     let network_links_priority_map = get_network_links_priority_map(&mut transaction)?;
     let keepalives_map = get_wireguard_keepalive_map(&mut transaction)?;
-    let my_machine = unwrap_or_else!(machines_map.get(for_machine), NoSuchMachine { hostname: for_machine }.fail()?);
+    let my_machine = unwrap_or_else!(
+        machines_map.get(for_machine),
+        bail!("Could not find machine {:?} in database", for_machine)
+    );
 
-    ensure!(my_machine.wireguard_ip.is_some(), MachineHasNoWireguard { hostname: for_machine });
+    ensure!(my_machine.wireguard_ip.is_some(), "Machine {:?} does not have WireGuard IP", for_machine);
 
     println!(indoc!("
         # infrabase-generated wg-quick config for {}
@@ -646,7 +665,8 @@ fn write_wireguard_peers(mut transaction: &mut Transaction) -> Result<()> {
     for machine in machines.into_iter() {
         let hostname = &machine.hostname;
         let wireguard_ip = &machine.wireguard_ip;
-        let path = rt_format!(path_template, hostname = hostname, wireguard_ip = wireguard_ip).map_err(|_| Error::FormatString)?;
+        let path = rt_format!(path_template, hostname = hostname, wireguard_ip = wireguard_ip).unwrap();
+        //             .context("Bad template in WIREGUARD_PEERS_PATH_TEMPLATE")?;
         let mut file = File::create(path)?;
         file.write_all(b"[\n")?;
         let mut peers = get_wireguard_peers(&machines_map, &network_links_priority_map, &keepalives_map, hostname)?;
@@ -905,17 +925,8 @@ fn run() -> Result<()> {
     Ok(())
 }
 
-fn main() {
-    std::process::exit(match run() {
-        Ok(()) => 0,
-        Err(err) => {
-            eprintln!("An error occurred:\n{}", err);
-            if let Some(bt) = err.backtrace() {
-                eprintln!("{}", bt);
-            }
-            1
-        },
-    });
+fn main() -> Result<()> {
+    run()
 }
 
 #[cfg(test)]
