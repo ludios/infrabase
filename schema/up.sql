@@ -106,7 +106,7 @@ CREATE VIEW machines_view AS
         providers.name AS provider_name,
         providers.email AS provider_email,
         provider_reference,
-        coalesce(networks.networks, array[]::varchar[]) AS networks,
+        coalesce(networks.networks, ARRAY['NONE']) AS networks,
         wireguard_ip,
         wireguard_port,
         wireguard_privkey,
