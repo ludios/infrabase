@@ -119,6 +119,13 @@ CREATE VIEW machines_view AS
     LEFT JOIN providers            ON machines.provider_id = providers.id
     LEFT JOIN (SELECT hostname, array_agg(network::varchar) AS networks FROM machine_addresses GROUP BY hostname) networks ON machines.hostname = networks.hostname;
 
+CREATE VIEW providers_count AS
+    SELECT count, provider_id, name, email FROM (
+        SELECT provider_id, COUNT(*) FROM machines GROUP BY provider_id
+    ) AS m
+    LEFT JOIN providers ON m.provider_id = id
+    ORDER BY count DESC;
+
 -- Remove all mentions of machine from database
 CREATE PROCEDURE remove_machine(kill_hostname varchar)
 LANGUAGE plpgsql
