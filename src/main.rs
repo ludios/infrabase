@@ -1,3 +1,4 @@
+#![deny(unsafe_code)]
 #![feature(proc_macro_hygiene)]
 
 mod wireguard;
