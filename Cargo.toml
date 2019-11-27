@@ -9,12 +9,12 @@ edition = "2018"
 [dependencies]
 dirs = "2.0"
 dotenv = "0.15.0"
-chrono = "0.4.7"
+chrono = "0.4"
 structopt = "0.3.4"
 log = "0.4.7"
 env_logger = "0.7.0"
 indoc = { version = "0.3.3", features = ["unstable"] }
-itertools = "0.8.0"
+itertools = "0.8"
 # Upstream stopped development
 natural_sort = { git = "https://github.com/ludios/natural-sort-rs" }
 tabwriter = "1.1.0"
