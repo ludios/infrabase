@@ -24,3 +24,8 @@ postgres = { git = "https://github.com/sfackler/rust-postgres", features = ["wit
 tokio-postgres = { git = "https://github.com/sfackler/rust-postgres" }
 anyhow = "1.0"
 thiserror = "1.0"
+
+[profile.dev]
+# Reduce debug rebuild time from 2.8s to 2.2s on 4790K
+# https://github.com/rust-gamedev/wg/issues/50#issuecomment-527160611
+debug = false
