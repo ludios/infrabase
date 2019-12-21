@@ -144,9 +144,9 @@ checksum = "a7c3dd8985a7111efc5c80b44e23ecdd8c007de8ade3b96595387e812b957cf5"
 
 [[package]]
 name = "bytes"
-version = "0.5.2"
+version = "0.5.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1c85319f157e4e26c703678e68e26ab71a46c0199286fa670b21cc9fec13d895"
+checksum = "10004c15deb332055f7a4a208190aed362cf9a7c2f6ab70a305fba50e1105f38"
 
 [[package]]
 name = "c2-chacha"
@@ -821,7 +821,7 @@ checksum = "5894c618ce612a3fa23881b152b608bafb8c56cfc22f434a3ba3120b40f7b587"
 [[package]]
 name = "postgres"
 version = "0.17.0-alpha.2"
-source = "git+https://github.com/sfackler/rust-postgres#0c84ed9f8201f4e5b4803199a24afa2c9f3723b2"
+source = "git+https://github.com/sfackler/rust-postgres#37d0a83434db8be2671b6fef541298458e7dd035"
 dependencies = [
  "bytes",
  "fallible-iterator",
@@ -834,7 +834,7 @@ dependencies = [
 [[package]]
 name = "postgres-protocol"
 version = "0.5.0-alpha.2"
-source = "git+https://github.com/sfackler/rust-postgres#0c84ed9f8201f4e5b4803199a24afa2c9f3723b2"
+source = "git+https://github.com/sfackler/rust-postgres#37d0a83434db8be2671b6fef541298458e7dd035"
 dependencies = [
  "base64",
  "byteorder",
@@ -852,7 +852,7 @@ dependencies = [
 [[package]]
 name = "postgres-types"
 version = "0.1.0-alpha.2"
-source = "git+https://github.com/sfackler/rust-postgres#0c84ed9f8201f4e5b4803199a24afa2c9f3723b2"
+source = "git+https://github.com/sfackler/rust-postgres#37d0a83434db8be2671b6fef541298458e7dd035"
 dependencies = [
  "bytes",
  "chrono",
@@ -1132,9 +1132,9 @@ checksum = "c111b5bd5695e56cffe5129854aa230b39c93a305372fdbb2668ca2394eea9f8"
 
 [[package]]
 name = "smallvec"
-version = "1.0.0"
+version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4ecf3b85f68e8abaa7555aa5abdb1153079387e60b718283d732f03897fcfc86"
+checksum = "44e59e0c9fa00817912ae6e4e6e3c4fe04455e75699d06eedc7d85917ed8e8f4"
 
 [[package]]
 name = "stringprep"
@@ -1273,11 +1273,12 @@ dependencies = [
 
 [[package]]
 name = "tokio"
-version = "0.2.2"
+version = "0.2.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2e765bf9f550bd9b8a970633ca3b56b8120c4b6c5dcbe26a93744cb02fee4b17"
+checksum = "0e1bef565a52394086ecac0a6fa3b8ace4cb3a138ee1d96bd2b93283b56824e3"
 dependencies = [
  "bytes",
+ "iovec",
  "lazy_static",
  "libc",
  "memchr",
@@ -1290,8 +1291,9 @@ dependencies = [
 [[package]]
 name = "tokio-postgres"
 version = "0.5.0-alpha.2"
-source = "git+https://github.com/sfackler/rust-postgres#0c84ed9f8201f4e5b4803199a24afa2c9f3723b2"
+source = "git+https://github.com/sfackler/rust-postgres#37d0a83434db8be2671b6fef541298458e7dd035"
 dependencies = [
+ "byteorder",
  "bytes",
  "fallible-iterator",
  "futures",
