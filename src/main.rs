@@ -515,13 +515,16 @@ fn get_network_to_network(
 
 fn print_ssh_config(mut transaction: &mut Transaction, for_machine: &str) -> Result<()> {
     let machines_map = get_machines_with_addresses(&mut transaction)?;
+    let source_machine =
+        &machines_map.get(for_machine)
+        .ok_or_else(|| anyhow!("machines_map missing {}", for_machine))?;
     let network_links_priority_map = get_network_links_priority_map(&mut transaction)?;
     let machines = get_sorted_machines(&machines_map);
 
     println!("# infrabase-generated SSH config for {}\n", for_machine);
 
     for machine in machines.into_iter() {
-        let network_to_network = get_network_to_network(&network_links_priority_map, &machine.networks, &machine.addresses);
+        let network_to_network = get_network_to_network(&network_links_priority_map, &source_machine.networks, &machine.addresses);
         let (address, ssh_port) = match network_to_network.get(0) {
             None => {
                 // We prefer to SSH over the non-WireGuard IP in case WireGuard is down,
