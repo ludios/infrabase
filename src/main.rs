@@ -182,9 +182,9 @@ fn print_tabwriter(tw: TabWriter<Vec<u8>>) -> Result<()> {
 /// Write a table header to a TabWriter
 fn write_column_names(tw: &mut TabWriter<Vec<u8>>, headers: Vec<&str>) -> Result<()> {
     tw.write_all(headers.join("\t").as_bytes())?;
-    tw.write_all("\n".as_bytes())?;
+    tw.write_all(b"\n")?;
     tw.write_all(headers.iter().map(|h| str::repeat("-", h.len())).join("\t").as_bytes())?;
-    tw.write_all("\n".as_bytes())?;
+    tw.write_all(b"\n")?;
     Ok(())
 }
 
