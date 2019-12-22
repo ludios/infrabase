@@ -368,7 +368,6 @@ fn get_existing_wireguard_ipv6_addresses(transaction: &mut Transaction) -> Resul
     Ok(iter)
 }
 
-#[allow(clippy::trivially_copy_pass_by_ref)]
 fn increment_ipv4_address(ip: &Ipv4Addr) -> Option<Ipv4Addr> {
     let mut octets = ip.octets();
     if octets == [255, 255, 255, 255] {
