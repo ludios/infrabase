@@ -11,7 +11,7 @@ mod nix;
 use std::iter;
 use std::collections::{HashMap, HashSet};
 use std::env;
-use std::net::{IpAddr, Ipv4Addr};
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::io::Write;
 use std::fs::File;
 use std::str;
@@ -43,7 +43,8 @@ fn postgres_client() -> Result<Client> {
 #[derive(Debug)]
 pub struct Machine {
     pub hostname: String,
-    pub wireguard_ip: Option<Ipv4Addr>,
+    pub wireguard_ipv4_address: Option<Ipv4Addr>,
+    pub wireguard_ipv6_address: Option<Ipv6Addr>,
     pub wireguard_port: Option<i32>,
     pub wireguard_privkey: Option<String>,
     pub wireguard_pubkey: Option<String>,
@@ -99,28 +100,39 @@ fn get_ipv4addr(ipaddr: IpAddr) -> Ipv4Addr {
     }
 }
 
+/// Get IPv6Addr from IpAddr or panic
+fn get_ipv6addr(ipaddr: IpAddr) -> Ipv6Addr {
+    match ipaddr {
+        IpAddr::V6(ip) => ip,
+        IpAddr::V4(_) => panic!("Got Ipv4Addr: {:?}", ipaddr),
+    }
+}
+
 fn get_machines_with_addresses(transaction: &mut Transaction) -> Result<MachinesMap> {
     let mut machines = HashMap::new();
     for row in transaction.query(
-        "SELECT hostname, wireguard_ip, wireguard_port, wireguard_privkey, wireguard_pubkey,
+        "SELECT hostname, wireguard_ipv4_address, wireguard_ipv6_address, wireguard_port, wireguard_privkey, wireguard_pubkey,
                 ssh_port, ssh_user, added_time, owner, provider_id, provider_reference, networks
          FROM machines_view", &[]
     )? {
-        let wireguard_ipaddr: Option<IpAddr> = row.get(1);
-        let wireguard_ip = wireguard_ipaddr.map(get_ipv4addr);
+        let wireguard_ipv4_address_ipaddr: Option<IpAddr> = row.get(1);
+        let wireguard_ipv6_address_ipaddr: Option<IpAddr> = row.get(2);
+        let wireguard_ipv4_address = wireguard_ipv4_address_ipaddr.map(get_ipv4addr);
+        let wireguard_ipv6_address = wireguard_ipv6_address_ipaddr.map(get_ipv6addr);
         let machine = Machine {
             hostname: row.get(0),
-            wireguard_ip,
-            wireguard_port: row.get(2),
-            wireguard_privkey: row.get(3),
-            wireguard_pubkey: row.get(4),
-            ssh_port: row.get(5),
-            ssh_user: row.get(6),
-            added_time: row.get(7),
-            owner: row.get(8),
-            provider_id: row.get(9),
-            provider_reference: row.get(10),
-            networks: row.get(11),
+            wireguard_ipv4_address,
+            wireguard_ipv6_address,
+            wireguard_port: row.get(3),
+            wireguard_privkey: row.get(4),
+            wireguard_pubkey: row.get(5),
+            ssh_port: row.get(6),
+            ssh_user: row.get(7),
+            added_time: row.get(8),
+            owner: row.get(9),
+            provider_id: row.get(10),
+            provider_reference: row.get(11),
+            networks: row.get(12),
             addresses: vec![],
         };
         machines.insert(machine.hostname.clone(), machine);
@@ -152,7 +164,15 @@ fn format_port(port: Option<i32>) -> String {
 }
 
 #[allow(clippy::trivially_copy_pass_by_ref)]
-fn format_wireguard_ip(wireguard_ip: &Option<Ipv4Addr>) -> String {
+fn format_wireguard_ipv4_address(wireguard_ip: &Option<Ipv4Addr>) -> String {
+    match wireguard_ip {
+        Some(ipaddr) => ipaddr.to_string(),
+        None => "-".to_string(),
+    }
+}
+
+#[allow(clippy::trivially_copy_pass_by_ref)]
+fn format_wireguard_ipv6_address(wireguard_ip: &Option<Ipv6Addr>) -> String {
     match wireguard_ip {
         Some(ipaddr) => ipaddr.to_string(),
         None => "-".to_string(),
@@ -303,11 +323,12 @@ fn list_machines(mut transaction: &mut Transaction) -> Result<()> {
     let machines_map = get_machines_with_addresses(&mut transaction)?;
     let machines = get_sorted_machines(&machines_map);
     let mut tw = TabWriter::new(vec![]);
-    write_column_names(&mut tw, vec!["HOSTNAME", "WIREGUARD", "OWNER", "PROV", "REFERENCE", "ADDRESSES"])?;
+    write_column_names(&mut tw, vec!["HOSTNAME", "WG IPV4", "WG IPV6", "OWNER", "PROV", "REFERENCE", "ADDRESSES"])?;
     for machine in machines.into_iter() {
-        writeln!(tw, "{}\t{}\t{}\t{}\t{}\t{}",
+        writeln!(tw, "{}\t{}\t{}\t{}\t{}\t{}\t{}",
                  machine.hostname,
-                 format_wireguard_ip(&machine.wireguard_ip),
+                 format_wireguard_ipv4_address(&machine.wireguard_ipv4_address),
+                 format_wireguard_ipv6_address(&machine.wireguard_ipv6_address),
                  machine.owner,
                  format_provider(machine.provider_id),
                  format_provider_reference(&machine.provider_reference),
@@ -335,10 +356,11 @@ fn nix_data(mut transaction: &mut Transaction) -> Result<()> {
     println!("{{");
     let mut tw = TabWriter::new(vec![]).padding(1);
     for machine in machines.into_iter() {
-        writeln!(tw, "  {}\t= {{ owner = {};\twireguard_ip = {};\twireguard_port = {};\tssh_port = {};\tprovider_id = {};\tprovider_reference = {};\taddresses = {{ {}}}; }};",
+        writeln!(tw, "  {}\t= {{ owner = {};\twireguard_ipv4_address = {};\twireguard_ipv6_address = {};\twireguard_port = {};\tssh_port = {};\tprovider_id = {};\tprovider_reference = {};\taddresses = {{ {}}}; }};",
                  machine.hostname,
                  machine.owner.to_nix(),
-                 format_wireguard_ip(&machine.wireguard_ip).to_nix(),
+                 format_wireguard_ipv4_address(&machine.wireguard_ipv4_address).to_nix(),
+                 format_wireguard_ipv6_address(&machine.wireguard_ipv6_address).to_nix(),
                  machine.wireguard_port.to_nix(),
                  machine.ssh_port.to_nix(),
                  &machine.provider_id.to_nix(),
@@ -361,8 +383,8 @@ fn print_wireguard_privkey(transaction: &mut Transaction, hostname: &str) -> Res
     Ok(())
 }
 
-fn get_existing_wireguard_ips(transaction: &mut Transaction) -> Result<impl Iterator<Item=Ipv4Addr>> {
-    let iter = transaction.query("SELECT wireguard_ip FROM wireguard_interfaces", &[])?
+fn get_existing_wireguard_ipv4_addresses(transaction: &mut Transaction) -> Result<impl Iterator<Item=Ipv4Addr>> {
+    let iter = transaction.query("SELECT wireguard_ipv4_address FROM wireguard_interfaces", &[])?
         .into_iter()
         .filter_map(|row| {
             let wireguard_ipaddr: Option<IpAddr> = row.get(0);
@@ -371,8 +393,18 @@ fn get_existing_wireguard_ips(transaction: &mut Transaction) -> Result<impl Iter
     Ok(iter)
 }
 
+fn get_existing_wireguard_ipv6_addresses(transaction: &mut Transaction) -> Result<impl Iterator<Item=Ipv6Addr>> {
+    let iter = transaction.query("SELECT wireguard_ipv6_address FROM wireguard_interfaces", &[])?
+        .into_iter()
+        .filter_map(|row| {
+            let wireguard_ipaddr: Option<IpAddr> = row.get(0);
+            wireguard_ipaddr.map(get_ipv6addr)
+        });
+    Ok(iter)
+}
+
 #[allow(clippy::trivially_copy_pass_by_ref)]
-fn increment_ip(ip: &Ipv4Addr) -> Option<Ipv4Addr> {
+fn increment_ipv4_address(ip: &Ipv4Addr) -> Option<Ipv4Addr> {
     let mut octets = ip.octets();
     if octets == [255, 255, 255, 255] {
         return None;
@@ -388,9 +420,39 @@ fn increment_ip(ip: &Ipv4Addr) -> Option<Ipv4Addr> {
     Some(Ipv4Addr::new(octets[0], octets[1], octets[2], octets[3]))
 }
 
-fn get_unused_wireguard_ip(mut transaction: &mut Transaction, start_ip: Ipv4Addr, end_ip: Ipv4Addr) -> Result<Option<Ipv4Addr>> {
-    let existing = get_existing_wireguard_ips(&mut transaction)?.collect::<HashSet<Ipv4Addr>>();
-    let ip_iter = iter::successors(Some(start_ip), increment_ip);
+fn increment_ipv6_address(ip: &Ipv6Addr) -> Option<Ipv6Addr> {
+    let mut segments = ip.segments();
+    if segments == [0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff] {
+        return None;
+    }
+    for i in (0..8).rev() {
+        if segments[i] < 0xffff {
+            segments[i] += 1;
+            break;
+        } else {
+            segments[i] = 0;
+        }
+    }
+    Some(Ipv6Addr::new(segments[0], segments[1], segments[2], segments[3], segments[4], segments[5], segments[6], segments[7]))
+}
+
+fn get_unused_wireguard_ipv4_address(mut transaction: &mut Transaction, start_ip: Ipv4Addr, end_ip: Ipv4Addr) -> Result<Option<Ipv4Addr>> {
+    let existing = get_existing_wireguard_ipv4_addresses(&mut transaction)?.collect::<HashSet<Ipv4Addr>>();
+    let ip_iter = iter::successors(Some(start_ip), increment_ipv4_address);
+    for proposed_ip in ip_iter {
+        if !existing.contains(&proposed_ip) {
+            return Ok(Some(proposed_ip));
+        }
+        if proposed_ip == end_ip {
+            break;
+        }
+    }
+    Ok(None)
+}
+
+fn get_unused_wireguard_ipv6_address(mut transaction: &mut Transaction, start_ip: Ipv6Addr, end_ip: Ipv6Addr) -> Result<Option<Ipv6Addr>> {
+    let existing = get_existing_wireguard_ipv6_addresses(&mut transaction)?.collect::<HashSet<Ipv6Addr>>();
+    let ip_iter = iter::successors(Some(start_ip), increment_ipv6_address);
     for proposed_ip in ip_iter {
         if !existing.contains(&proposed_ip) {
             return Ok(Some(proposed_ip));
@@ -413,16 +475,17 @@ fn add_machine(
     owner: Option<String>,
     ssh_port: Option<u16>,
     ssh_user: Option<String>,
-    wireguard_ip: Option<Ipv4Addr>,
+    wireguard_ipv4_address: Option<Ipv4Addr>,
+    wireguard_ipv6_address: Option<Ipv6Addr>,
     wireguard_port: Option<u16>,
     provider: Option<i32>,
     provider_reference: Option<String>,
 ) -> Result<()> {
     // Required environmental variables
-    let start_ip = env_var("WIREGUARD_IP_START")?.parse::<Ipv4Addr>()
-        .context("Could not parse WIREGUARD_IP_START as an Ipv4Addr")?;
-    let end_ip = env_var("WIREGUARD_IP_END")?.parse::<Ipv4Addr>()
-        .context("Could not parse WIREGUARD_IP_END as an Ipv4Addr")?;
+    let ipv4_start = env_var("WIREGUARD_IPV4_START")?.parse::<Ipv4Addr>().context("Could not parse WIREGUARD_IPV4_START as an Ipv4Addr")?;
+    let ipv4_end   = env_var("WIREGUARD_IPV4_END")  ?.parse::<Ipv4Addr>().context("Could not parse WIREGUARD_IPV4_END as an Ipv4Addr")?;
+    let ipv6_start = env_var("WIREGUARD_IPV6_START")?.parse::<Ipv6Addr>().context("Could not parse WIREGUARD_IPV6_START as an Ipv6Addr")?;
+    let ipv6_end   = env_var("WIREGUARD_IPV6_END")  ?.parse::<Ipv6Addr>().context("Could not parse WIREGUARD_IPV6_END as an Ipv6Addr")?;
 
     // Optional environmental variables
     let ssh_port = unwrap_or_else!(
@@ -457,11 +520,18 @@ fn add_machine(
         }
     );
 
-    let wireguard_ip = match wireguard_ip {
+    let wireguard_ipv4_address = match wireguard_ipv4_address {
         Some(ip) => ip,
         None => {
-            get_unused_wireguard_ip(&mut transaction, start_ip, end_ip)?
-                .context("Could not find an unused WireGuard IP between WIREGUARD_IP_START and WIREGUARD_IP_END")?
+            get_unused_wireguard_ipv4_address(&mut transaction, ipv4_start, ipv4_end)?
+                .context("Could not find an unused WireGuard IPv4 address between WIREGUARD_IPV4_START and WIREGUARD_IPV4_END")?
+        }
+    };
+    let wireguard_ipv6_address = match wireguard_ipv6_address {
+        Some(ip) => ip,
+        None => {
+            get_unused_wireguard_ipv6_address(&mut transaction, ipv6_start, ipv6_end)?
+                .context("Could not find an unused WireGuard IPv6 address between WIREGUARD_IPV6_START and WIREGUARD_IPV6_END")?
         }
     };
     let keypair = wireguard::generate_keypair()?;
@@ -477,9 +547,9 @@ fn add_machine(
         &[&hostname, &i32::from(ssh_port), &ssh_user]
     )?;
     transaction.execute(
-        "INSERT INTO wireguard_interfaces (hostname, wireguard_ip, wireguard_port, wireguard_privkey, wireguard_pubkey)
-                VALUES ($1::varchar, $2::inet, $3::integer, $4::varchar, $5::varchar)",
-        &[&hostname, &IpAddr::V4(wireguard_ip), &i32::from(wireguard_port), &str::from_utf8(&keypair.privkey).unwrap(), &str::from_utf8(&keypair.pubkey).unwrap()]
+        "INSERT INTO wireguard_interfaces (hostname, wireguard_ipv4_address, wireguard_ipv6_address, wireguard_port, wireguard_privkey, wireguard_pubkey)
+                VALUES ($1::varchar, $2::inet, $3::inet, $4::integer, $5::varchar, $6::varchar)",
+        &[&hostname, &IpAddr::V4(wireguard_ipv4_address), &IpAddr::V6(wireguard_ipv6_address), &i32::from(wireguard_port), &str::from_utf8(&keypair.privkey).unwrap(), &str::from_utf8(&keypair.pubkey).unwrap()]
     )?;
     transaction.commit()?;
 
@@ -529,7 +599,7 @@ fn print_ssh_config(mut transaction: &mut Transaction, for_machine: &str) -> Res
             None => {
                 // We prefer to SSH over the non-WireGuard IP in case WireGuard is down,
                 // but if there is no reachable address, use the WireGuard IP instead.
-                (machine.wireguard_ip.map(IpAddr::V4), machine.ssh_port)
+                (machine.wireguard_ipv4_address.map(IpAddr::V4), machine.ssh_port)
             },
             Some((_, dest_network)) => {
                 let desired_address = machine.addresses.iter().find(|a| a.network == **dest_network).unwrap();
@@ -552,7 +622,8 @@ fn print_ssh_config(mut transaction: &mut Transaction, for_machine: &str) -> Res
 struct WireguardPeer {
     hostname: String,
     wireguard_pubkey: String,
-    wireguard_ip: Ipv4Addr,
+    wireguard_ipv4_address: Ipv4Addr,
+    wireguard_ipv6_address: Ipv6Addr,
     endpoint: Option<(IpAddr, u16)>,
     keepalive: Option<i32>,
 }
@@ -591,12 +662,15 @@ fn get_wireguard_peers(
         };
 
         // If we have a wireguard peer
-        if let (Some(wireguard_ip), Some(wireguard_pubkey)) = (machine.wireguard_ip, &machine.wireguard_pubkey) {
+        if let (Some(wireguard_ipv4_address),
+                Some(wireguard_ipv6_address),
+                Some(wireguard_pubkey)) = (machine.wireguard_ipv4_address, machine.wireguard_ipv6_address, &machine.wireguard_pubkey) {
             let keepalive = keepalives_map.get(&(for_machine.to_string(), machine.hostname.to_string())).copied();
             peers.push(WireguardPeer {
                 hostname: machine.hostname.clone(),
                 wireguard_pubkey: wireguard_pubkey.clone(),
-                wireguard_ip,
+                wireguard_ipv4_address,
+                wireguard_ipv6_address,
                 endpoint,
                 keepalive,
             });
@@ -622,16 +696,22 @@ fn print_wg_quick(mut transaction: &mut Transaction, for_machine: &str) -> Resul
         bail!("Could not find machine {:?} in database", for_machine)
     );
 
-    ensure!(my_machine.wireguard_ip.is_some(), "Machine {:?} does not have WireGuard IP", for_machine);
+    ensure!(my_machine.wireguard_ipv4_address.is_some(), "Machine {:?} does not have WireGuard IPv4 address", for_machine);
+    ensure!(my_machine.wireguard_ipv6_address.is_some(), "Machine {:?} does not have WireGuard IPv6 address", for_machine);
 
     println!(indoc!("
         # infrabase-generated wg-quick config for {}
 
         [Interface]
-        Address = {}/32
+        Address = {}/32, {}/128
         PrivateKey = {}
         ListenPort = {}
-    "), for_machine, my_machine.wireguard_ip.unwrap(), my_machine.wireguard_privkey.as_ref().unwrap(), my_machine.wireguard_port.unwrap());
+    "),
+        for_machine,
+        my_machine.wireguard_ipv4_address.unwrap(), my_machine.wireguard_ipv6_address.unwrap(),
+        my_machine.wireguard_privkey.as_ref().unwrap(),
+        my_machine.wireguard_port.unwrap()
+    );
 
     let mut peers = get_wireguard_peers(&machines_map, &network_links_priority_map, &keepalives_map, for_machine)?;
     sort_wireguard_peers(&mut peers);
@@ -648,10 +728,16 @@ fn print_wg_quick(mut transaction: &mut Transaction, for_machine: &str) -> Resul
             # {}
             [Peer]
             PublicKey = {}
-            AllowedIPs = {}
+            AllowedIPs = {}/32, {}/128
             {}\
             {}\
-        "), peer.hostname, peer.wireguard_pubkey, peer.wireguard_ip, maybe_endpoint, maybe_keepalive);
+        "),
+            peer.hostname,
+            peer.wireguard_pubkey,
+            peer.wireguard_ipv4_address, peer.wireguard_ipv6_address,
+            maybe_endpoint,
+            maybe_keepalive
+        );
     }
     Ok(())
 }
@@ -666,15 +752,17 @@ fn write_wireguard_peers(mut transaction: &mut Transaction) -> Result<()> {
     let path_template = env_var("WIREGUARD_PEERS_PATH_TEMPLATE")?;
 
     for machine in machines.into_iter() {
-        let hostname = &machine.hostname;
-        let wireguard_ip = &machine.wireguard_ip;
         let path =
             // Beware https://github.com/SpaceManiac/runtime-fmt/issues/6
-            rt_format!(path_template, hostname = hostname, wireguard_ip = wireguard_ip)
-            .map_err(|_| anyhow!("Bad template in WIREGUARD_PEERS_PATH_TEMPLATE: allowed tokens are {hostname} and {wireguard_ip}"))?;
+            rt_format!(path_template,
+                       hostname = &machine.hostname,
+                       wireguard_ipv4_address = &machine.wireguard_ipv4_address,
+                       wireguard_ipv6_address = &machine.wireguard_ipv6_address)
+            .map_err(|_| anyhow!("Bad template in WIREGUARD_PEERS_PATH_TEMPLATE: allowed tokens are \
+                                  {hostname}, {wireguard_ipv4_address}, and {wireguard_ipv6_address}"))?;
         let mut file = File::create(path)?;
         file.write_all(b"[\n")?;
-        let mut peers = get_wireguard_peers(&machines_map, &network_links_priority_map, &keepalives_map, hostname)?;
+        let mut peers = get_wireguard_peers(&machines_map, &network_links_priority_map, &keepalives_map, &machine.hostname)?;
         sort_wireguard_peers(&mut peers);
         for peer in peers.iter() {
             let maybe_endpoint = match peer.endpoint {
@@ -685,8 +773,12 @@ fn write_wireguard_peers(mut transaction: &mut Transaction) -> Result<()> {
                 Some(interval) => format!("persistentKeepalive = {}; ", interval),
                 None => "".to_string()
             };
-            writeln!(file, "  {{ name = {}; allowedIPs = [ {} ]; publicKey = {}; {}{}}}",
-                     peer.hostname.to_nix(), peer.wireguard_ip.to_nix(), peer.wireguard_pubkey.to_nix(), maybe_endpoint, maybe_keepalive)?;
+            writeln!(file, "  {{ name = {}; allowedIPs = [ \"{}/32\" \"{}/128\" ]; publicKey = {}; {}{}}}",
+                     peer.hostname.to_nix(),
+                     peer.wireguard_ipv4_address, peer.wireguard_ipv6_address,
+                     peer.wireguard_pubkey.to_nix(),
+                     maybe_endpoint,
+                     maybe_keepalive)?;
         }
         file.write_all(b"]\n")?;
     }
@@ -756,11 +848,17 @@ enum InfrabaseCommand {
         #[structopt(long)]
         ssh_user: Option<String>,
 
-        /// WireGuard IP
+        /// WireGuard IPv4 IP
         ///
         /// If one is not provided, an unused IP address will be selected.
         #[structopt(long)]
-        wireguard_ip: Option<Ipv4Addr>,
+        wireguard_ipv4_address: Option<Ipv4Addr>,
+
+        /// WireGuard IPv6 IP
+        ///
+        /// If one is not provided, an unused IP address will be selected.
+        #[structopt(long)]
+        wireguard_ipv6_address: Option<Ipv6Addr>,
 
         /// WireGuard port
         ///
@@ -914,8 +1012,8 @@ fn main() -> Result<()> {
         InfrabaseCommand::NixData => {
             nix_data(&mut transaction)?;
         },
-        InfrabaseCommand::Add { hostname, owner, ssh_port, ssh_user, wireguard_ip, wireguard_port, provider, provider_reference } => {
-            add_machine(transaction, &hostname, owner, ssh_port, ssh_user, wireguard_ip, wireguard_port, provider, provider_reference)?;
+        InfrabaseCommand::Add { hostname, owner, ssh_port, ssh_user, wireguard_ipv4_address, wireguard_ipv6_address, wireguard_port, provider, provider_reference } => {
+            add_machine(transaction, &hostname, owner, ssh_port, ssh_user, wireguard_ipv4_address, wireguard_ipv6_address, wireguard_port, provider, provider_reference)?;
         },
         InfrabaseCommand::Remove { hostname } => {
             remove_machine(transaction, &hostname)?;
@@ -932,17 +1030,28 @@ fn main() -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::increment_ip;
-    use std::net::Ipv4Addr;
+    use super::{increment_ipv4_address, increment_ipv6_address};
+    use std::net::{Ipv4Addr, Ipv6Addr};
 
     #[test]
-    fn test_increment_ip() {
-        assert_eq!(increment_ip(&Ipv4Addr::new(0,   0,   0,   0)),   Some(Ipv4Addr::new(0, 0, 0,   1)));
-        assert_eq!(increment_ip(&Ipv4Addr::new(0,   0,   0,   1)),   Some(Ipv4Addr::new(0, 0, 0,   2)));
-        assert_eq!(increment_ip(&Ipv4Addr::new(0,   0,   1,   255)), Some(Ipv4Addr::new(0, 0, 2,   0)));
-        assert_eq!(increment_ip(&Ipv4Addr::new(0,   0,   255, 0)),   Some(Ipv4Addr::new(0, 0, 255, 1)));
-        assert_eq!(increment_ip(&Ipv4Addr::new(0,   2,   255, 255)), Some(Ipv4Addr::new(0, 3, 0,   0)));
-        assert_eq!(increment_ip(&Ipv4Addr::new(3,   255, 255, 255)), Some(Ipv4Addr::new(4, 0, 0,   0)));
-        assert_eq!(increment_ip(&Ipv4Addr::new(255, 255, 255, 255)), None);
+    fn test_increment_ipv4_address() {
+        assert_eq!(increment_ipv4_address(&Ipv4Addr::new(0,   0,   0,   0)),   Some(Ipv4Addr::new(0, 0, 0,   1)));
+        assert_eq!(increment_ipv4_address(&Ipv4Addr::new(0,   0,   0,   1)),   Some(Ipv4Addr::new(0, 0, 0,   2)));
+        assert_eq!(increment_ipv4_address(&Ipv4Addr::new(0,   0,   1,   255)), Some(Ipv4Addr::new(0, 0, 2,   0)));
+        assert_eq!(increment_ipv4_address(&Ipv4Addr::new(0,   0,   255, 0)),   Some(Ipv4Addr::new(0, 0, 255, 1)));
+        assert_eq!(increment_ipv4_address(&Ipv4Addr::new(0,   2,   255, 255)), Some(Ipv4Addr::new(0, 3, 0,   0)));
+        assert_eq!(increment_ipv4_address(&Ipv4Addr::new(3,   255, 255, 255)), Some(Ipv4Addr::new(4, 0, 0,   0)));
+        assert_eq!(increment_ipv4_address(&Ipv4Addr::new(255, 255, 255, 255)), None);
+    }
+
+    #[test]
+    fn test_increment_ipv6_address() {
+        assert_eq!(increment_ipv6_address(&"0:0:0:0:0:0:0:0"                        .parse::<Ipv6Addr>().unwrap()), Some("0:0:0:0:0:0:0:1"   .parse().unwrap()));
+        assert_eq!(increment_ipv6_address(&"0:0:0:0:0:0:0:1"                        .parse::<Ipv6Addr>().unwrap()), Some("0:0:0:0:0:0:0:2"   .parse().unwrap()));
+        assert_eq!(increment_ipv6_address(&"0:0:0:0:0:0:1:ffff"                     .parse::<Ipv6Addr>().unwrap()), Some("0:0:0:0:0:0:2:0"   .parse().unwrap()));
+        assert_eq!(increment_ipv6_address(&"0:0:0:0:0:0:ffff:0"                     .parse::<Ipv6Addr>().unwrap()), Some("0:0:0:0:0:0:ffff:1".parse().unwrap()));
+        assert_eq!(increment_ipv6_address(&"0:0:0:0:0:2:ffff:ffff"                  .parse::<Ipv6Addr>().unwrap()), Some("0:0:0:0:0:3:0:0"   .parse().unwrap()));
+        assert_eq!(increment_ipv6_address(&"0:0:0:0:3:ffff:ffff:ffff"               .parse::<Ipv6Addr>().unwrap()), Some("0:0:0:0:4:0:0:0"   .parse().unwrap()));
+        assert_eq!(increment_ipv6_address(&"ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff".parse::<Ipv6Addr>().unwrap()), None);
     }
 }

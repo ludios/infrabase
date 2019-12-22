@@ -1,4 +1,5 @@
 CREATE DOMAIN inet4          AS inet         CHECK (family(VALUE) = 4);
+CREATE DOMAIN inet6          AS inet         CHECK (family(VALUE) = 6);
 CREATE DOMAIN hostname       AS varchar(32)  CHECK (VALUE ~ '\A[-_a-z0-9]+\Z');
 CREATE DOMAIN netname        AS varchar(32)  CHECK (VALUE ~ '\A(NONE|[-_a-z0-9]+)\Z');
 CREATE DOMAIN port           AS integer      CHECK (VALUE > 0 AND VALUE <= 65536);
@@ -56,11 +57,12 @@ CREATE TABLE machines (
 
 -- Separate table because not all machines have an infrabase-managed WireGuard interface
 CREATE TABLE wireguard_interfaces (
-   hostname           hostname       NOT NULL PRIMARY KEY REFERENCES machines,
-   wireguard_ip       inet4          NOT NULL,
-   wireguard_port     port           NOT NULL,
-   wireguard_privkey  wireguard_key  NOT NULL,
-   wireguard_pubkey   wireguard_key  NOT NULL,
+   hostname                hostname       NOT NULL PRIMARY KEY REFERENCES machines,
+   wireguard_ipv4_address  inet4          NOT NULL,
+   wireguard_ipv6_address  inet6          NOT NULL,
+   wireguard_port          port           NOT NULL,
+   wireguard_privkey       wireguard_key  NOT NULL,
+   wireguard_pubkey        wireguard_key  NOT NULL,
    UNIQUE (wireguard_privkey),
    UNIQUE (wireguard_pubkey)
 );
@@ -107,7 +109,8 @@ CREATE VIEW machines_view AS
         providers.email AS provider_email,
         provider_reference,
         coalesce(networks.networks, ARRAY['NONE']) AS networks,
-        wireguard_ip,
+        wireguard_ipv4_address,
+        wireguard_ipv6_address,
         wireguard_port,
         wireguard_privkey,
         wireguard_pubkey,
