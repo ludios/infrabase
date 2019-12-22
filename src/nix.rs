@@ -21,6 +21,12 @@ impl ToNix for std::net::Ipv4Addr {
     }
 }
 
+impl ToNix for std::net::Ipv6Addr {
+    fn to_nix(&self) -> String {
+        self.to_string().to_nix()
+    }
+}
+
 impl ToNix for i32 {
     fn to_nix(&self) -> String {
         format!("{}", self)

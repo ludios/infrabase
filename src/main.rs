@@ -3,6 +3,7 @@
 
 mod wireguard;
 mod nix;
+mod table_cell;
 #[macro_use] mod macros;
 
 #[macro_use] extern crate itertools;
@@ -28,6 +29,7 @@ use itertools::Itertools;
 use chrono::{DateTime, Utc};
 
 use nix::ToNix;
+use table_cell::ToTableCell;
 
 fn import_env() -> Result<()> {
     let path = dirs::config_dir().unwrap().join("infrabase").join("env");
@@ -156,43 +158,6 @@ fn get_machines_with_addresses(transaction: &mut Transaction) -> Result<Machines
     Ok(machines)
 }
 
-fn format_port(port: Option<i32>) -> String {
-    match port {
-        Some(port) => port.to_string(),
-        None => "-".to_string(),
-    }
-}
-
-#[allow(clippy::trivially_copy_pass_by_ref)]
-fn format_wireguard_ipv4_address(wireguard_ip: &Option<Ipv4Addr>) -> String {
-    match wireguard_ip {
-        Some(ipaddr) => ipaddr.to_string(),
-        None => "-".to_string(),
-    }
-}
-
-#[allow(clippy::trivially_copy_pass_by_ref)]
-fn format_wireguard_ipv6_address(wireguard_ip: &Option<Ipv6Addr>) -> String {
-    match wireguard_ip {
-        Some(ipaddr) => ipaddr.to_string(),
-        None => "-".to_string(),
-    }
-}
-
-fn format_provider(provider: Option<i32>) -> String {
-    match provider {
-        Some(p) => p.to_string(),
-        None => "-".to_string(),
-    }
-}
-
-fn format_provider_reference(reference: &Option<String>) -> String {
-    match reference {
-        Some(p) => p.to_string(),
-        None => "-".to_string(),
-    }
-}
-
 fn print_tabwriter(tw: TabWriter<Vec<u8>>) -> Result<()> {
     let bytes = tw.into_inner()?;
     std::io::stdout().write_all(&bytes)?;
@@ -296,8 +261,8 @@ fn list_addresses(transaction: &mut Transaction) -> Result<()> {
                  address.hostname,
                  address.network,
                  address.address,
-                 format_port(address.ssh_port),
-                 format_port(address.wireguard_port),
+                 address.ssh_port.to_cell(),
+                 address.wireguard_port.to_cell(),
         )?;
     }
     print_tabwriter(tw)
@@ -327,11 +292,11 @@ fn list_machines(mut transaction: &mut Transaction) -> Result<()> {
     for machine in machines.into_iter() {
         writeln!(tw, "{}\t{}\t{}\t{}\t{}\t{}\t{}",
                  machine.hostname,
-                 format_wireguard_ipv4_address(&machine.wireguard_ipv4_address),
-                 format_wireguard_ipv6_address(&machine.wireguard_ipv6_address),
+                 &machine.wireguard_ipv4_address.to_cell(),
+                 &machine.wireguard_ipv6_address.to_cell(),
                  machine.owner,
-                 format_provider(machine.provider_id),
-                 format_provider_reference(&machine.provider_reference),
+                 machine.provider_id.to_cell(),
+                 &machine.provider_reference.to_cell(),
                  machine.addresses.iter().map(|a| {
                      format!("{}={}", a.network, a.address)
                  }).join(" ")
@@ -359,8 +324,8 @@ fn nix_data(mut transaction: &mut Transaction) -> Result<()> {
         writeln!(tw, "  {}\t= {{ owner = {};\twireguard_ipv4_address = {};\twireguard_ipv6_address = {};\twireguard_port = {};\tssh_port = {};\tprovider_id = {};\tprovider_reference = {};\taddresses = {{ {}}}; }};",
                  machine.hostname,
                  machine.owner.to_nix(),
-                 format_wireguard_ipv4_address(&machine.wireguard_ipv4_address).to_nix(),
-                 format_wireguard_ipv6_address(&machine.wireguard_ipv6_address).to_nix(),
+                 &machine.wireguard_ipv4_address.to_nix(),
+                 &machine.wireguard_ipv6_address.to_nix(),
                  machine.wireguard_port.to_nix(),
                  machine.ssh_port.to_nix(),
                  &machine.provider_id.to_nix(),
