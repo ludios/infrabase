@@ -4,7 +4,7 @@ CREATE DOMAIN hostname       AS varchar(32)  CHECK (VALUE ~ '\A[-_a-z0-9]+\Z');
 CREATE DOMAIN netname        AS varchar(32)  CHECK (VALUE ~ '\A(NONE|[-_a-z0-9]+)\Z');
 CREATE DOMAIN port           AS integer      CHECK (VALUE > 0 AND VALUE <= 65536);
 CREATE DOMAIN wireguard_key  AS varchar(44)  CHECK (VALUE ~ '\A[+/A-Za-z0-9]{43}=\Z');
- -- Match default /etc/adduser.conf NAME_REGEX
+-- Match default /etc/adduser.conf NAME_REGEX
 CREATE DOMAIN username       AS varchar(32)  CHECK (VALUE ~ '\A[a-z][-a-z0-9_]{1,31}\Z');
 CREATE DOMAIN email          AS varchar(254) CHECK (VALUE ~ '\A.+@.+\Z');
 CREATE DOMAIN owner          AS varchar(32);
