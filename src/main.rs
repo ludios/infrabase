@@ -611,8 +611,8 @@ fn print_ssh_config(mut transaction: &mut Transaction, for_machine: &str) -> Res
         let network_to_network = get_network_to_network(&network_links_priority_map, &source_machine.networks, &machine.addresses);
         let (address, ssh_port) = match network_to_network.get(0) {
             None => {
-                // We prefer to SSH over the non-WireGuard IP in case WireGuard is down,
-                // but if there is no reachable address, use the WireGuard IP instead.
+                // We prefer to SSH over the non-WireGuard IP because WireGuard may be down,
+                // but in cases where there is no reachable address, use the WireGuard IP instead.
                 (machine.wireguard_ipv4_address.map(IpAddr::V4), machine.ssh_port)
             },
             Some((_, dest_network)) => {
