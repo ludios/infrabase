@@ -19,7 +19,8 @@ itertools = "0.8"
 natural_sort = { git = "https://github.com/ludios/natural-sort-rs" }
 tabwriter = "1.1.0"
 termcolor = "1.0.5"
-runtime-fmt = "0.4.1"
+# Until https://github.com/SpaceManiac/runtime-fmt/issues/13 is fixed
+runtime-fmt = { git = "https://github.com/ludios/runtime-fmt" }
 postgres = { git = "https://github.com/sfackler/rust-postgres", features = ["with-chrono-0_4"] }
 tokio-postgres = { git = "https://github.com/sfackler/rust-postgres" }
 anyhow = "1.0"
