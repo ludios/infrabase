@@ -35,6 +35,8 @@ CREATE TABLE network_links (
     priority       integer  NOT NULL,
     PRIMARY KEY (name, other_network)
 );
+SELECT periods.add_system_time_period('network_links', 'row_start', 'row_end');
+SELECT periods.add_system_versioning('network_links');
 
 -- Hosting accounts
 CREATE TABLE providers (
@@ -42,6 +44,8 @@ CREATE TABLE providers (
     name   varchar(32)  NOT NULL,
     email  email        NOT NULL
 );
+SELECT periods.add_system_time_period('providers', 'row_start', 'row_end');
+SELECT periods.add_system_versioning('providers');
 
 -- Valid owners
 CREATE TABLE owners (
@@ -51,11 +55,12 @@ CREATE TABLE owners (
 CREATE TABLE machines (
     hostname            hostname     PRIMARY KEY,
     added_time          timestamptz  NOT NULL DEFAULT now(),
-    removed_time        timestamptz, -- NULL if not removed
     owner               owner        NOT NULL REFERENCES owners(owner),
     provider_id         integer      REFERENCES providers(id),
     provider_reference  text
 );
+SELECT periods.add_system_time_period('machines', 'row_start', 'row_end');
+SELECT periods.add_system_versioning('machines');
 
 -- Separate table because not all machines have an infrabase-managed WireGuard interface
 CREATE TABLE wireguard_interfaces (
@@ -68,6 +73,8 @@ CREATE TABLE wireguard_interfaces (
    UNIQUE (wireguard_privkey),
    UNIQUE (wireguard_pubkey)
 );
+SELECT periods.add_system_time_period('wireguard_interfaces', 'row_start', 'row_end');
+SELECT periods.add_system_versioning('wireguard_interfaces');
 
 -- Separate table because not all machines have an SSH server
 CREATE TABLE ssh_servers (
@@ -75,6 +82,8 @@ CREATE TABLE ssh_servers (
     ssh_port  port      NOT NULL,
     ssh_user  username  NOT NULL DEFAULT 'root'
 );
+SELECT periods.add_system_time_period('ssh_servers', 'row_start', 'row_end');
+SELECT periods.add_system_versioning('ssh_servers');
 
 CREATE TABLE wireguard_keepalives (
     source_machine  hostname  NOT NULL REFERENCES machines(hostname),
@@ -83,6 +92,8 @@ CREATE TABLE wireguard_keepalives (
     interval_sec    integer   NOT NULL CHECK (interval_sec >= 1 AND interval_sec <= 65535),
     PRIMARY KEY (source_machine, target_machine)
 );
+SELECT periods.add_system_time_period('wireguard_keepalives', 'row_start', 'row_end');
+SELECT periods.add_system_versioning('wireguard_keepalives');
 
 -- Note: you should use a different WireGuard port for each machine behind the same NAT.
 --
@@ -100,12 +111,13 @@ CREATE TABLE machine_addresses (
     UNIQUE (address, ssh_port),
     UNIQUE (address, wireguard_port)
 );
+SELECT periods.add_system_time_period('machine_addresses', 'row_start', 'row_end');
+SELECT periods.add_system_versioning('machine_addresses');
 
 CREATE VIEW machines_view AS
     SELECT
         machines.hostname,
         added_time,
-        removed_time,
         owner,
         provider_id,
         providers.name AS provider_name,
@@ -131,3 +143,14 @@ CREATE VIEW providers_count AS
     ) AS m
     LEFT JOIN providers ON m.provider_id = id
     ORDER BY count DESC;
+
+-- Remove a machine from all non-history tables
+CREATE PROCEDURE remove_machine(kill_hostname varchar)
+LANGUAGE SQL
+AS $$
+    DELETE FROM wireguard_interfaces WHERE hostname = kill_hostname;
+    DELETE FROM ssh_servers          WHERE hostname = kill_hostname;
+    DELETE FROM machine_addresses    WHERE hostname = kill_hostname;
+    DELETE FROM wireguard_keepalives WHERE source_machine = kill_hostname OR target_machine = kill_hostname;
+    DELETE FROM machines             WHERE hostname = kill_hostname;
+$$;

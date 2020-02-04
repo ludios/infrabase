@@ -53,7 +53,6 @@ pub struct Machine {
     pub ssh_port: Option<i32>,
     pub ssh_user: Option<String>,
     pub added_time: DateTime<Utc>,
-    pub removed_time: Option<DateTime<Utc>>,
     pub owner: String,
     pub provider_id: Option<i32>,
     pub provider_reference: Option<String>,
@@ -111,19 +110,13 @@ fn get_ipv6addr(ipaddr: IpAddr) -> Ipv6Addr {
     }
 }
 
-fn get_machines_with_addresses(transaction: &mut Transaction, all: bool) -> Result<MachinesMap> {
+fn get_machines_with_addresses(transaction: &mut Transaction) -> Result<MachinesMap> {
     let mut machines = HashMap::new();
-    let where_clause = if all {
-        ""
-    } else {
-        // The ones that haven't been removed
-        "WHERE removed_time IS NULL"
-    };
     for row in transaction.query(
         &*format!(
             "SELECT hostname, wireguard_ipv4_address, wireguard_ipv6_address, wireguard_port, wireguard_privkey, wireguard_pubkey,
-                    ssh_port, ssh_user, added_time, removed_time, owner, provider_id, provider_reference, networks
-             FROM machines_view {}", where_clause), &[]
+                    ssh_port, ssh_user, added_time, owner, provider_id, provider_reference, networks
+             FROM machines_view"), &[]
     )? {
         let wireguard_ipv4_address_ipaddr: Option<IpAddr> = row.get(1);
         let wireguard_ipv6_address_ipaddr: Option<IpAddr> = row.get(2);
@@ -139,11 +132,10 @@ fn get_machines_with_addresses(transaction: &mut Transaction, all: bool) -> Resu
             ssh_port: row.get(6),
             ssh_user: row.get(7),
             added_time: row.get(8),
-            removed_time: row.get(9),
-            owner: row.get(10),
-            provider_id: row.get(11),
-            provider_reference: row.get(12),
-            networks: row.get(13),
+            owner: row.get(9),
+            provider_id: row.get(10),
+            provider_reference: row.get(11),
+            networks: row.get(12),
             addresses: vec![],
         };
         machines.insert(machine.hostname.clone(), machine);
@@ -244,18 +236,11 @@ fn remove_address(mut transaction: Transaction, hostname: &str, network: &str, a
     Ok(())
 }
 
-fn list_addresses(transaction: &mut Transaction, all: bool) -> Result<()> {
+fn list_addresses(transaction: &mut Transaction) -> Result<()> {
     let mut addresses = vec![];
-    let query = [
-        "SELECT machine_addresses.hostname, network, address, ssh_port, wireguard_port, machines.removed_time FROM machine_addresses
-         JOIN machines ON machines.hostname = machine_addresses.hostname",
-        if all {
-            ""
-        } else {
-            " WHERE removed_time IS NULL"
-        }
-    ].concat();
-    let mut removed_times: HashMap<String, Option<DateTime<Utc>>> = HashMap::new();
+    let query = 
+        "SELECT machine_addresses.hostname, network, address, ssh_port, wireguard_port FROM machine_addresses
+         JOIN machines ON machines.hostname = machine_addresses.hostname";
     for row in transaction.query(&*query, &[])? {
         addresses.push(MachineAddress {
             hostname: row.get(0),
@@ -264,7 +249,6 @@ fn list_addresses(transaction: &mut Transaction, all: bool) -> Result<()> {
             ssh_port: row.get(3),
             wireguard_port: row.get(4)
         });
-        removed_times.insert(row.get(0), row.get(5));
     }
 
     // natural_sort refuses to compare string segments with integer segments,
@@ -276,10 +260,7 @@ fn list_addresses(transaction: &mut Transaction, all: bool) -> Result<()> {
     });
 
     let mut tw = TabWriter::new(vec![]);
-    let columns = [
-        vec!["HOSTNAME", "NETWORK", "ADDRESS", "SSH", "WG"],
-        if all { vec!["REMOVED"] } else { vec![] },
-    ].concat();
+    let columns = vec!["HOSTNAME", "NETWORK", "ADDRESS", "SSH", "WG"];
     write_column_names(&mut tw, columns)?;
     for address in &addresses {
         write_table_cell(&mut tw, &address.hostname)?;
@@ -287,14 +268,6 @@ fn list_addresses(transaction: &mut Transaction, all: bool) -> Result<()> {
         write_table_cell(&mut tw, address.address)?;
         write_table_cell(&mut tw, address.ssh_port)?;
         write_table_cell(&mut tw, address.wireguard_port)?;
-        if all {
-            write_table_cell(&mut tw,                 
-                match removed_times.get(&address.hostname).unwrap() {
-                    Some(time) => format!("{}", time.format("%Y-%m-%d")),
-                    None => "-".to_string()
-                }
-            )?;
-        }
         tw.write_all(b"\n")?;
     }
     print_tabwriter(tw)
@@ -321,15 +294,11 @@ fn write_table_cell<T: ToTableCell>(tw: &mut TabWriter<Vec<u8>>, value: T) -> st
     tw.write_all(b"\t")
 }
 
-fn list_machines(mut transaction: &mut Transaction, all: bool) -> Result<()> {
-    let machines_map = get_machines_with_addresses(&mut transaction, all)?;
+fn list_machines(mut transaction: &mut Transaction) -> Result<()> {
+    let machines_map = get_machines_with_addresses(&mut transaction)?;
     let machines = get_sorted_machines(&machines_map);
     let mut tw = TabWriter::new(vec![]);
-    let columns = [
-        vec!["HOSTNAME", "WG IPV4", "WG IPV6", "OWNER", "PROV", "REFERENCE"],
-        if all { vec!["REMOVED"] } else { vec![] },
-        vec!["ADDRESSES"]
-    ].concat();
+    let columns = vec!["HOSTNAME", "WG IPV4", "WG IPV6", "OWNER", "PROV", "REFERENCE", "ADDRESSES"];
     write_column_names(&mut tw, columns)?;
     for machine in machines.into_iter() {
         write_table_cell(&mut tw, &machine.hostname)?;
@@ -338,14 +307,6 @@ fn list_machines(mut transaction: &mut Transaction, all: bool) -> Result<()> {
         write_table_cell(&mut tw, &machine.owner)?;
         write_table_cell(&mut tw, machine.provider_id)?;
         write_table_cell(&mut tw, &machine.provider_reference)?;
-        if all {
-            write_table_cell(&mut tw,
-                match machine.removed_time {
-                    Some(time) => format!("{}", time.format("%Y-%m-%d")),
-                    None => "-".to_string()
-                }
-            )?;
-        }
         write_table_cell(&mut tw, machine.addresses.iter().map(|a| {
             format!("{}={}", a.network, a.address)
         }).join(" "))?;
@@ -364,7 +325,7 @@ fn format_nix_address(address: &MachineAddress) -> String {
 }
 
 fn nix_data(mut transaction: &mut Transaction) -> Result<()> {
-    let machines_map = get_machines_with_addresses(&mut transaction, false)?;
+    let machines_map = get_machines_with_addresses(&mut transaction)?;
     let machines = get_sorted_machines(&machines_map);
 
     println!("{{");
@@ -571,7 +532,7 @@ fn add_machine(
 }
 
 fn remove_machine(mut transaction: Transaction, hostname: &str) -> Result<()> {
-    transaction.execute("UPDATE machines SET removed_time = now() WHERE hostname = $1", &[&hostname])?;
+    transaction.execute("call remove_machine($1)", &[&hostname])?;
     transaction.commit()?;
     Ok(())
 }
@@ -598,7 +559,7 @@ fn get_network_to_network(
 }
 
 fn print_ssh_config(mut transaction: &mut Transaction, for_machine: &str) -> Result<()> {
-    let machines_map = get_machines_with_addresses(&mut transaction, false)?;
+    let machines_map = get_machines_with_addresses(&mut transaction)?;
     let source_machine =
         &machines_map.get(for_machine)
         .ok_or_else(|| anyhow!("machines_map missing {}", for_machine))?;
@@ -702,7 +663,7 @@ fn sort_wireguard_peers(peers: &mut Vec<WireguardPeer>) {
 }
 
 fn print_wg_quick(mut transaction: &mut Transaction, for_machine: &str) -> Result<()> {
-    let machines_map = get_machines_with_addresses(&mut transaction, false)?;
+    let machines_map = get_machines_with_addresses(&mut transaction)?;
     let network_links_priority_map = get_network_links_priority_map(&mut transaction)?;
     let keepalives_map = get_wireguard_keepalive_map(&mut transaction)?;
     let my_machine = unwrap_or_else!(
@@ -758,7 +719,7 @@ fn print_wg_quick(mut transaction: &mut Transaction, for_machine: &str) -> Resul
 
 /// Write a .nix file for each machine listing its WireGuard peers
 fn write_wireguard_peers(mut transaction: &mut Transaction) -> Result<()> {
-    let machines_map = get_machines_with_addresses(&mut transaction, false)?;
+    let machines_map = get_machines_with_addresses(&mut transaction)?;
     let network_links_priority_map = get_network_links_priority_map(&mut transaction)?;
     let keepalives_map = get_wireguard_keepalive_map(&mut transaction)?;
     let machines = get_sorted_machines(&machines_map);
@@ -831,11 +792,7 @@ enum InfrabaseCommand {
 
     #[structopt(name = "ls")]
     /// List machines
-    List {
-        /// Include removed machines
-        #[structopt(short, long)]
-        all: bool,
-    },
+    List,
 
     #[structopt(name = "nix-data")]
     /// Output machine and address data in Nix format for use in configuration
@@ -942,11 +899,7 @@ enum ProviderCommand {
 enum AddressCommand {
     #[structopt(name = "ls")]
     /// List addresses
-    List {
-        /// Include addresses for removed machines
-        #[structopt(short, long)]
-        all: bool,
-    },
+    List,
 
     #[structopt(name = "add")]
     /// Add address
@@ -1009,7 +962,7 @@ fn main() -> Result<()> {
         },
         InfrabaseCommand::Address(cmd) => {
             match cmd {
-                AddressCommand::List { all } => list_addresses(&mut transaction, all)?,
+                AddressCommand::List => list_addresses(&mut transaction)?,
                 AddressCommand::Add { hostname, network, address, ssh_port, wireguard_port } => {
                     add_address(transaction, &hostname, &network, &address, ssh_port, wireguard_port)?
                 },
@@ -1029,8 +982,8 @@ fn main() -> Result<()> {
         InfrabaseCommand::WriteWireguardPeers => {
             write_wireguard_peers(&mut transaction)?;
         },
-        InfrabaseCommand::List { all } => {
-            list_machines(&mut transaction, all)?;
+        InfrabaseCommand::List => {
+            list_machines(&mut transaction)?;
         },
         InfrabaseCommand::NixData => {
             nix_data(&mut transaction)?;
