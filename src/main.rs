@@ -188,7 +188,7 @@ fn list_providers(transaction: &mut Transaction) -> Result<()> {
 fn list_wireguard_keepalives(transaction: &mut Transaction) -> Result<()> {
     let mut tw = TabWriter::new(vec![]);
     write_column_names(&mut tw, vec!["SOURCE", "TARGET", "INTERVAL"])?;
-    for row in transaction.query("SELECT source_machine, target_machine, interval_sec FROM wireguard_keepalives", &[])? {
+    for row in transaction.query("SELECT source_machine, target_machine, interval_sec FROM wireguard_keepalives ORDER BY (source_machine, target_machine)", &[])? {
         let source_machine: String = row.get(0);
         let target_machine: String = row.get(1);
         let interval_sec: i32 = row.get(2);
