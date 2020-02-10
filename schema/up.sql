@@ -132,8 +132,8 @@ CREATE VIEW machines_view AS
         ssh_port,
         ssh_user
     FROM machines
-    LEFT JOIN wireguard_interfaces ON machines.hostname = wireguard_interfaces.hostname
-    LEFT JOIN ssh_servers          ON machines.hostname = ssh_servers.hostname
+    LEFT JOIN wireguard_interfaces ON machines.hostname    = wireguard_interfaces.hostname
+    LEFT JOIN ssh_servers          ON machines.hostname    = ssh_servers.hostname
     LEFT JOIN providers            ON machines.provider_id = providers.id
     LEFT JOIN (SELECT hostname, array_agg(network::varchar) AS networks FROM machine_addresses GROUP BY hostname) networks ON machines.hostname = networks.hostname;
 
