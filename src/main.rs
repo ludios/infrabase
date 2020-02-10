@@ -20,7 +20,6 @@ use std::string::ToString;
 use std::convert::TryFrom;
 use tabwriter::TabWriter;
 use postgres::{Client, Transaction, NoTls};
-use dotenv;
 use anyhow::{ensure, anyhow, bail, Context, Result};
 use structopt::StructOpt;
 use indoc::indoc;
@@ -113,10 +112,9 @@ fn get_ipv6addr(ipaddr: IpAddr) -> Ipv6Addr {
 fn get_machines_with_addresses(transaction: &mut Transaction) -> Result<MachinesMap> {
     let mut machines = HashMap::new();
     for row in transaction.query(
-        &*format!(
-            "SELECT hostname, wireguard_ipv4_address, wireguard_ipv6_address, wireguard_port, wireguard_privkey, wireguard_pubkey,
-                    ssh_port, ssh_user, added_time, owner, provider_id, provider_reference, networks
-             FROM machines_view"), &[]
+        "SELECT hostname, wireguard_ipv4_address, wireguard_ipv6_address, wireguard_port, wireguard_privkey, wireguard_pubkey,
+                ssh_port, ssh_user, added_time, owner, provider_id, provider_reference, networks
+         FROM machines_view", &[]
     )? {
         let wireguard_ipv4_address_ipaddr: Option<IpAddr> = row.get(1);
         let wireguard_ipv6_address_ipaddr: Option<IpAddr> = row.get(2);
