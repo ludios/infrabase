@@ -197,6 +197,31 @@ fn list_wireguard_keepalives(transaction: &mut Transaction) -> Result<()> {
     print_tabwriter(tw)
 }
 
+fn add_wireguard_keepalive(mut transaction: Transaction, source: &str, target: &str, interval_sec: Option<u16>) -> Result<()> {
+    let interval_sec = unwrap_or_else!(
+        interval_sec,
+        env_var("DEFAULT_WIREGUARD_KEEPALIVE_INTERVAL_SEC")?.parse::<u16>()
+            .context("Could not parse DEFAULT_WIREGUARD_KEEPALIVE_INTERVAL_SEC as a u16")?
+    );
+    transaction.execute(
+        "INSERT INTO wireguard_keepalives (source_machine, target_machine, interval_sec)
+         VALUES ($1::varchar, $2::varchar, $3::integer)",
+        &[&source, &target, &i32::from(interval_sec)],
+    )?;
+    transaction.commit()?;
+    Ok(())
+}
+
+fn remove_wireguard_keepalive(mut transaction: Transaction, source: &str, target: &str) -> Result<()> {
+    let num_deleted = transaction.execute(
+        "DELETE FROM wireguard_keepalives WHERE source_machine = $1 AND target_machine = $2",
+        &[&source, &target],
+    )?;
+    ensure!(num_deleted == 1, "Could not find keepalive ({:?}, {:?}) in database", source, target);
+    transaction.commit()?;
+    Ok(())
+}
+
 fn add_address(
     mut transaction: Transaction,
     hostname: &str,
@@ -882,8 +907,38 @@ enum InfrabaseCommand {
 #[derive(StructOpt, Debug)]
 enum WireguardKeepaliveCommand {
     #[structopt(name = "ls")]
-    /// List WireGuard persistent keepalives
+    /// List persistent keepalives
     List,
+
+    #[structopt(name = "add")]
+    /// Add persistent keepalive
+    Add {
+        /// Source machine hostname
+        #[structopt(name = "SOURCE")]
+        source: String,
+
+        /// Target machine hostname
+        #[structopt(name = "TARGET")]
+        target: String,
+
+        /// SSH port
+        ///
+        /// If one is not provided, DEFAULT_WIREGUARD_KEEPALIVE_INTERVAL_SEC will be used from the environment.
+        #[structopt(long)]
+        interval_sec: Option<u16>,
+    },
+
+    #[structopt(name = "rm")]
+    /// Remove persistent keepalive
+    Remove {
+        /// Source machine hostname
+        #[structopt(name = "SOURCE")]
+        source: String,
+
+        /// Target machine hostname
+        #[structopt(name = "TARGET")]
+        target: String,
+    },
 }
 
 #[derive(StructOpt, Debug)]
@@ -972,6 +1027,12 @@ fn main() -> Result<()> {
         InfrabaseCommand::WireguardKeepalive(cmd) => {
             match cmd {
                 WireguardKeepaliveCommand::List => list_wireguard_keepalives(&mut transaction)?,
+                WireguardKeepaliveCommand::Add { source, target, interval_sec } => {
+                    add_wireguard_keepalive(transaction, &source, &target, interval_sec)?
+                },
+                WireguardKeepaliveCommand::Remove { source, target } => {
+                    remove_wireguard_keepalive(transaction, &source, &target)?
+                },
             }
         },
         InfrabaseCommand::WireguardPrivkey { hostname } => {
