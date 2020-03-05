@@ -1,3 +1,5 @@
+\set ON_ERROR_STOP on
+
 CREATE SCHEMA infra;
 SET search_path TO infra;
 
