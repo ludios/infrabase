@@ -21,8 +21,8 @@ tabwriter = "1.1.0"
 termcolor = "1.0.5"
 # Until https://github.com/SpaceManiac/runtime-fmt/issues/13 is fixed
 runtime-fmt = { git = "https://github.com/ludios/runtime-fmt" }
-postgres = { git = "https://github.com/sfackler/rust-postgres", features = ["with-chrono-0_4"] }
-tokio-postgres = { git = "https://github.com/sfackler/rust-postgres" }
+postgres = { version = "0.17", features = ["with-chrono-0_4"] }
+tokio-postgres = { version = "0.5" }
 anyhow = "1.0"
 thiserror = "1.0"
 
