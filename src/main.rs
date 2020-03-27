@@ -741,7 +741,7 @@ fn print_wg_quick(mut transaction: &mut Transaction, for_machine: &str) -> Resul
 }
 
 /// Write a .nix file for each machine listing its WireGuard peers
-fn write_wireguard_peers(mut transaction: &mut Transaction) -> Result<()> {
+fn write_wireguard_peers(mut transaction: &mut Transaction, with_names: bool) -> Result<()> {
     let machines_map = get_machines_with_addresses(&mut transaction)?;
     let network_links_priority_map = get_network_links_priority_map(&mut transaction)?;
     let keepalives_map = get_wireguard_keepalive_map(&mut transaction)?;
@@ -771,12 +771,20 @@ fn write_wireguard_peers(mut transaction: &mut Transaction) -> Result<()> {
                 Some(interval) => format!("persistentKeepalive = {}; ", interval),
                 None => "".to_string()
             };
-            writeln!(file, "  {{ name = {}; allowedIPs = [ \"{}/32\" \"{}/128\" ]; publicKey = {}; {}{}}}",
-                     peer.hostname.to_nix(),
-                     peer.wireguard_ipv4_address, peer.wireguard_ipv6_address,
-                     peer.wireguard_pubkey.to_nix(),
-                     maybe_endpoint,
-                     maybe_keepalive)?;
+            if with_names {
+                writeln!(file, "  {{ name = {}; allowedIPs = [ \"{}/32\" \"{}/128\" ]; publicKey = {}; {}{}}}",
+                         peer.hostname.to_nix(),
+                         peer.wireguard_ipv4_address, peer.wireguard_ipv6_address,
+                         peer.wireguard_pubkey.to_nix(),
+                         maybe_endpoint,
+                         maybe_keepalive)?;
+            } else {
+                writeln!(file, "  {{ allowedIPs = [ \"{}/32\" \"{}/128\" ]; publicKey = {}; {}{}}}",
+                         peer.wireguard_ipv4_address, peer.wireguard_ipv6_address,
+                         peer.wireguard_pubkey.to_nix(),
+                         maybe_endpoint,
+                         maybe_keepalive)?;
+            }
         }
         file.write_all(b"]\n")?;
     }
@@ -803,7 +811,11 @@ enum InfrabaseCommand {
 
     #[structopt(name = "write-wg-peers")]
     /// Write out all WireGuard peers files used for NixOS configuration
-    WriteWireguardPeers,
+    WriteWireguardPeers {
+        /// Omit the `name = "..."` not supported in upstream nixpkgs
+        #[structopt(long = "no-names")]
+        no_names: bool,
+    },
 
     /// Subcommands to work with providers
     #[structopt(name = "provider")]
@@ -1038,8 +1050,8 @@ fn main() -> Result<()> {
         InfrabaseCommand::WireguardPrivkey { hostname } => {
             print_wireguard_privkey(&mut transaction, &hostname)?;
         },
-        InfrabaseCommand::WriteWireguardPeers => {
-            write_wireguard_peers(&mut transaction)?;
+        InfrabaseCommand::WriteWireguardPeers { no_names } => {
+            write_wireguard_peers(&mut transaction, !no_names)?;
         },
         InfrabaseCommand::List => {
             list_machines(&mut transaction)?;
