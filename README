@@ -1,0 +1,23 @@
+infrabase 0.1.0
+the machine inventory system
+
+USAGE:
+    i <SUBCOMMAND>
+
+FLAGS:
+    -h, --help       Print help information
+    -V, --version    Print version information
+
+SUBCOMMANDS:
+    add               Add machine
+    address           Subcommands to work with addresses
+    help              Prints this message or the help of the given subcommand(s)
+    ls                List machines
+    nix-data          Output machine and address data in Nix format for use in configuration
+    provider          Subcommands to work with providers
+    rm                Remove machine
+    ssh-config        Prints an ~/.ssh/config that lists all machines
+    wg-keepalive      Subcommands to work with WireGuard persistent keepalives
+    wg-privkey        Print a machine's private WireGuard key
+    wg-quick          Output a wg-quick config for a machine
+    write-wg-peers    Write out all WireGuard peers files used for NixOS configuration
