@@ -8,9 +8,9 @@ edition = "2018"
 
 [dependencies]
 dirs = "2.0"
-dotenv = "0.15.0"
+dotenv = "0.15"
 chrono = "0.4"
-structopt = "0.3.4"
+structopt = "0.3"
 log = "0.4.7"
 env_logger = "0.7.0"
 indoc = { version = "0.3.3", features = ["unstable"] }
