@@ -713,7 +713,7 @@ fn print_wg_quick(mut transaction: &mut Transaction, for_machine: &str) -> Resul
 
     let mut peers = get_wireguard_peers(&machines_map, &network_links_priority_map, &keepalives_map, for_machine)?;
     sort_wireguard_peers(&mut peers);
-    for peer in peers.iter() {
+    for peer in peers {
         let maybe_endpoint = match peer.endpoint {
             Some((address, port)) => format!("Endpoint = {}:{}\n", address, port),
             None => "".to_string(),
@@ -762,7 +762,7 @@ fn write_wireguard_peers(mut transaction: &mut Transaction, with_names: bool) ->
         file.write_all(b"[\n")?;
         let mut peers = get_wireguard_peers(&machines_map, &network_links_priority_map, &keepalives_map, &machine.hostname)?;
         sort_wireguard_peers(&mut peers);
-        for peer in peers.iter() {
+        for peer in peers {
             let maybe_endpoint = match peer.endpoint {
                 Some((address, port)) => format!("endpoint = \"{}:{}\"; ", address, port),
                 None => "".to_string(),

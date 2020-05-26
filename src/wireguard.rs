@@ -48,7 +48,7 @@ mod tests {
     /// Does not chomp anything if there is no trailing newline
     #[test]
     fn test_chomp_newline_no_change() {
-        for string in [b"hello\nworld".to_vec(), b" ".to_vec(), b"".to_vec()].iter() {
+        for string in &[b"hello\nworld".to_vec(), b" ".to_vec(), b"".to_vec()] {
             let mut vec = string.clone();
             chomp_newline(&mut vec);
             assert_eq!(vec, *string);
