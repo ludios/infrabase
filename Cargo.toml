@@ -7,17 +7,17 @@ edition = "2018"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-dirs = "2.0"
+dirs = "2"
 dotenv = "0.15"
 chrono = "0.4"
 structopt = "0.3"
-log = "0.4.7"
-env_logger = "0.7.0"
-indoc = { version = "0.3.3", features = ["unstable"] }
+log = "0.4"
+env_logger = "0.7"
+indoc = { version = "0.3", features = ["unstable"] }
 itertools = "0.9"
 # Upstream stopped development
 natural_sort = { git = "https://github.com/ludios/natural-sort-rs" }
-tabwriter = "1.1.0"
+tabwriter = "1"
 # Until https://github.com/SpaceManiac/runtime-fmt/issues/13 is fixed
 runtime-fmt = { git = "https://github.com/ludios/runtime-fmt" }
 postgres = { version = "0.17", features = ["with-chrono-0_4"] }
