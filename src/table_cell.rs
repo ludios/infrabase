@@ -11,34 +11,13 @@ impl ToTableCell for String {
 
 impl ToTableCell for &String {
     fn to_cell(&self) -> String {
-        (*self).to_cell()
+        self.to_string()
     }
 }
 
-impl ToTableCell for Option<i32> {
+impl ToTableCell for i32 {
     fn to_cell(&self) -> String {
-        match self {
-            Some(port) => port.to_string(),
-            None => "-".to_string(),
-        }
-    }
-}
-
-impl ToTableCell for Option<String> {
-    fn to_cell(&self) -> String {
-        match self {
-            Some(s) => s.to_string(),
-            None => "-".to_string(),
-        }
-    }
-}
-
-impl ToTableCell for &Option<String> {
-    fn to_cell(&self) -> String {
-        match self {
-            Some(s) => s.to_string(),
-            None => "-".to_string(),
-        }
+        self.to_string()
     }
 }
 
@@ -60,19 +39,19 @@ impl ToTableCell for std::net::Ipv6Addr {
     }
 }
 
-impl ToTableCell for Option<std::net::Ipv4Addr> {
+impl<T: ToTableCell> ToTableCell for Option<T> {
     fn to_cell(&self) -> String {
         match self {
-            Some(ipaddr) => ipaddr.to_cell(),
+            Some(s) => s.to_cell(),
             None => "-".to_string(),
         }
     }
 }
 
-impl ToTableCell for Option<std::net::Ipv6Addr> {
+impl<T: ToTableCell> ToTableCell for &Option<T> {
     fn to_cell(&self) -> String {
         match self {
-            Some(ipaddr) => ipaddr.to_cell(),
+            Some(s) => s.to_cell(),
             None => "-".to_string(),
         }
     }
