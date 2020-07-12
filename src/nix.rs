@@ -5,7 +5,7 @@ pub(crate) trait ToNix {
 impl ToNix for String {
     fn to_nix(&self) -> String {
         // TODO: replace " with \"
-        format!(r#""{}""#, self)
+        format!(r#""{self}""#)
     }
 }
 
@@ -29,7 +29,7 @@ impl ToNix for std::net::Ipv6Addr {
 
 impl ToNix for i32 {
     fn to_nix(&self) -> String {
-        format!("{}", self)
+        self.to_string()
     }
 }
 

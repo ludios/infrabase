@@ -180,7 +180,7 @@ fn list_providers(transaction: &mut Transaction) -> Result<()> {
         let id: i32 = row.get(0);
         let name: String = row.get(1);
         let email: String = row.get(2);
-        writeln!(tw, "{}\t{}\t{}", id, name, email)?;
+        writeln!(tw, "{id}\t{name}\t{email}")?;
     }
     print_tabwriter(tw)
 }
@@ -192,7 +192,7 @@ fn list_wireguard_keepalives(transaction: &mut Transaction) -> Result<()> {
         let source_machine: String = row.get(0);
         let target_machine: String = row.get(1);
         let interval_sec: i32 = row.get(2);
-        writeln!(tw, "{}\t{}\t{}", source_machine, target_machine, interval_sec)?;
+        writeln!(tw, "{source_machine}\t{target_machine}\t{interval_sec}")?;
     }
     print_tabwriter(tw)
 }
@@ -768,26 +768,24 @@ fn write_wireguard_peers(mut transaction: &mut Transaction, with_names: bool) ->
         sort_wireguard_peers(&mut peers);
         for peer in peers {
             let maybe_endpoint = match peer.endpoint {
-                Some((address, port)) => format!("endpoint = \"{}:{}\"; ", address, port),
+                Some((address, port)) => format!("endpoint = \"{address}:{port}\"; "),
                 None => "".to_string(),
             };
             let maybe_keepalive = match peer.keepalive {
-                Some(interval) => format!("persistentKeepalive = {}; ", interval),
+                Some(interval) => format!("persistentKeepalive = {interval}; "),
                 None => "".to_string()
             };
             if with_names {
-                writeln!(file, "  {{ name = {}; allowedIPs = [ \"{}/32\" \"{}/128\" ]; publicKey = {}; {}{}}}",
+                writeln!(file, "  {{ name = {}; allowedIPs = [ \"{}/32\" \"{}/128\" ]; publicKey = {}; {maybe_endpoint}{maybe_keepalive}}}",
                          peer.hostname.to_nix(),
-                         peer.wireguard_ipv4_address, peer.wireguard_ipv6_address,
-                         peer.wireguard_pubkey.to_nix(),
-                         maybe_endpoint,
-                         maybe_keepalive)?;
+                         peer.wireguard_ipv4_address,
+                         peer.wireguard_ipv6_address,
+                         peer.wireguard_pubkey.to_nix())?;
             } else {
-                writeln!(file, "  {{ allowedIPs = [ \"{}/32\" \"{}/128\" ]; publicKey = {}; {}{}}}",
-                         peer.wireguard_ipv4_address, peer.wireguard_ipv6_address,
-                         peer.wireguard_pubkey.to_nix(),
-                         maybe_endpoint,
-                         maybe_keepalive)?;
+                writeln!(file, "  {{ allowedIPs = [ \"{}/32\" \"{}/128\" ]; publicKey = {}; {maybe_endpoint}{maybe_keepalive}}}",
+                         peer.wireguard_ipv4_address,
+                         peer.wireguard_ipv6_address,
+                         peer.wireguard_pubkey.to_nix())?;
             }
         }
         file.write_all(b"]\n")?;
