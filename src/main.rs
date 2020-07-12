@@ -1,5 +1,6 @@
 #![deny(unsafe_code)]
 #![feature(proc_macro_hygiene)]
+#![feature(format_args_capture)]
 
 mod wireguard;
 mod nix;
@@ -589,7 +590,7 @@ fn print_ssh_config(mut transaction: &mut Transaction, for_machine: &str) -> Res
     let network_links_priority_map = get_network_links_priority_map(&mut transaction)?;
     let machines = get_sorted_machines(&machines_map);
 
-    println!("# infrabase-generated SSH config for {}\n", for_machine);
+    println!("# infrabase-generated SSH config for {for_machine}\n");
 
     for machine in machines.into_iter() {
         let network_to_network = get_network_to_network(&network_links_priority_map, &source_machine.networks, &machine.addresses);
@@ -715,11 +716,11 @@ fn print_wg_quick(mut transaction: &mut Transaction, for_machine: &str) -> Resul
     sort_wireguard_peers(&mut peers);
     for peer in peers {
         let maybe_endpoint = match peer.endpoint {
-            Some((address, port)) => format!("Endpoint = {}:{}\n", address, port),
+            Some((address, port)) => format!("Endpoint = {address}:{port}\n"),
             None => "".to_string(),
         };
         let maybe_keepalive = match peer.keepalive {
-            Some(interval) => format!("PersistentKeepalive = {}\n", interval),
+            Some(interval) => format!("PersistentKeepalive = {interval}\n"),
             None => "".to_string()
         };
         println!(indoc!("
