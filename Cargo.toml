@@ -13,7 +13,6 @@ chrono = "0.4"
 structopt = "0.3"
 log = "0.4"
 env_logger = "0.7"
-indoc = { version = "0.3", features = ["unstable"] }
 itertools = "0.9"
 # Upstream stopped development
 natural_sort = { git = "https://github.com/ludios/natural-sort-rs" }

@@ -23,7 +23,6 @@ use tabwriter::TabWriter;
 use postgres::{Client, Transaction, NoTls};
 use anyhow::{ensure, anyhow, bail, Context, Result};
 use structopt::StructOpt;
-use indoc::indoc;
 use natural_sort::HumanStr;
 use itertools::Itertools;
 use chrono::{DateTime, Utc};
@@ -701,19 +700,20 @@ fn print_wg_quick(mut transaction: &mut Transaction, for_machine: &str) -> Resul
     ensure!(my_machine.wireguard_ipv4_address.is_some(), "Machine {:?} does not have WireGuard IPv4 address", for_machine);
     ensure!(my_machine.wireguard_ipv6_address.is_some(), "Machine {:?} does not have WireGuard IPv6 address", for_machine);
 
-    println!(indoc!("
-        # infrabase-generated wg-quick config for {}
-
-        [Interface]
-        Address = {}/32, {}/128
-        PrivateKey = {}
-        ListenPort = {}
-    "),
-        for_machine,
-        my_machine.wireguard_ipv4_address.unwrap(), my_machine.wireguard_ipv6_address.unwrap(),
-        my_machine.wireguard_privkey.as_ref().unwrap(),
-        my_machine.wireguard_port.unwrap()
-    );
+    {
+        let privkey = my_machine.wireguard_privkey.as_ref().unwrap();
+        let my_ipv4_address = &my_machine.wireguard_ipv4_address.unwrap();
+        let my_ipv6_address = &my_machine.wireguard_ipv6_address.unwrap();
+        let listen_port = &my_machine.wireguard_port.unwrap();
+        println!("\
+            # infrabase-generated wg-quick config for {for_machine}\n\
+            \n\
+            [Interface]\n\
+            Address = {my_ipv4_address}/32, {my_ipv6_address}/128\n\
+            PrivateKey = {privkey}\n\
+            ListenPort = {listen_port}\n\
+        ");
+    }
 
     let mut peers = get_wireguard_peers(&machines_map, &network_links_priority_map, &keepalives_map, for_machine)?;
     sort_wireguard_peers(&mut peers);
@@ -726,20 +726,20 @@ fn print_wg_quick(mut transaction: &mut Transaction, for_machine: &str) -> Resul
             Some(interval) => format!("PersistentKeepalive = {interval}\n"),
             None => "".to_string()
         };
-        println!(indoc!("
-            # {}
-            [Peer]
-            PublicKey = {}
-            AllowedIPs = {}/32, {}/128
-            {}\
-            {}\
-        "),
-            peer.hostname,
-            peer.wireguard_pubkey,
-            peer.wireguard_ipv4_address, peer.wireguard_ipv6_address,
-            maybe_endpoint,
-            maybe_keepalive
-        );
+        {
+            let peer_hostname = &peer.hostname;
+            let peer_pubkey = &peer.wireguard_pubkey;
+            let peer_ipv4_address = &peer.wireguard_ipv4_address;
+            let peer_ipv6_address = &peer.wireguard_ipv6_address;
+            println!("\
+                # {peer_hostname}\n\
+                [Peer]\n\
+                PublicKey = {peer_pubkey}\n\
+                AllowedIPs = {peer_ipv4_address}/32, {peer_ipv6_address}/128\n\
+                {maybe_endpoint}\
+                {maybe_keepalive}\
+            ");
+        }
     }
     Ok(())
 }
