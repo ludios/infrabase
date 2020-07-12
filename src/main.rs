@@ -607,12 +607,15 @@ fn print_ssh_config(mut transaction: &mut Transaction, for_machine: &str) -> Res
         };
 
         if let (Some(address), Some(port)) = (address, ssh_port) {
-            println!(indoc!("
-                # owner: {}
-                Host {}
-                  HostName {}
-                  Port {}
-            "), machine.owner, machine.hostname, address, port);
+            let owner = &machine.owner;
+            let hostname = &machine.hostname;
+            let t = "  ";
+            println!("\
+                # owner: {owner}\n\
+                Host {hostname}\n\
+                {t}HostName {address}\n\
+                {t}Port {port}\n\
+            ");
         }
     }
     Ok(())
