@@ -6,8 +6,6 @@ mod nix;
 mod table_cell;
 #[macro_use] mod macros;
 
-#[macro_use] extern crate itertools;
-
 use std::iter;
 use std::collections::{HashMap, HashSet};
 use std::env;
@@ -22,7 +20,7 @@ use postgres::{Client, Transaction, NoTls};
 use anyhow::{ensure, anyhow, bail, Context, Result};
 use structopt::StructOpt;
 use natural_sort::HumanStr;
-use itertools::Itertools;
+use itertools::{Itertools, iproduct};
 use chrono::{DateTime, Utc};
 
 use nix::ToNix;
