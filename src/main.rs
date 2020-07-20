@@ -1,5 +1,4 @@
 #![deny(unsafe_code)]
-#![feature(proc_macro_hygiene)]
 #![feature(format_args_capture)]
 
 mod wireguard;
@@ -8,7 +7,6 @@ mod table_cell;
 #[macro_use] mod macros;
 
 #[macro_use] extern crate itertools;
-#[macro_use] extern crate runtime_fmt;
 
 use std::iter;
 use std::collections::{HashMap, HashSet};
@@ -754,14 +752,10 @@ fn write_wireguard_peers(mut transaction: &mut Transaction, with_names: bool) ->
     let path_template = env_var("WIREGUARD_PEERS_PATH_TEMPLATE")?;
 
     for machine in machines.into_iter() {
-        let path =
-            // Beware https://github.com/SpaceManiac/runtime-fmt/issues/6
-            rt_format!(path_template,
-                       hostname = &machine.hostname,
-                       wireguard_ipv4_address = &machine.wireguard_ipv4_address,
-                       wireguard_ipv6_address = &machine.wireguard_ipv6_address)
-            .map_err(|_| anyhow!("Bad template in WIREGUARD_PEERS_PATH_TEMPLATE: allowed tokens are \
-                                  {hostname}, {wireguard_ipv4_address}, and {wireguard_ipv6_address}"))?;
+        let path = path_template
+            .replace("{hostname}", &machine.hostname)
+            .replace("{wireguard_ipv4_address}", &machine.wireguard_ipv4_address.unwrap().to_string())
+            .replace("{wireguard_ipv6_address}", &machine.wireguard_ipv6_address.unwrap().to_string());
         let mut file = File::create(path)?;
         file.write_all(b"[\n")?;
         let mut peers = get_wireguard_peers(&machines_map, &network_links_priority_map, &keepalives_map, &machine.hostname)?;

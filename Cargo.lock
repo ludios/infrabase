@@ -467,7 +467,6 @@ dependencies = [
  "log",
  "natural_sort",
  "postgres",
- "runtime-fmt",
  "structopt",
  "tabwriter",
  "tokio-postgres",
@@ -1047,14 +1046,6 @@ name = "regex-syntax"
 version = "0.6.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "26412eb97c6b088a6997e05f69403a802a92d520de2f8e63c2b65f9e0f47c4e8"
-
-[[package]]
-name = "runtime-fmt"
-version = "0.4.1"
-source = "git+https://github.com/ludios/runtime-fmt#4448167ade21750a0aedfe880d4132b71d7624b7"
-dependencies = [
- "unicode-xid",
-]
 
 [[package]]
 name = "rust-argon2"
