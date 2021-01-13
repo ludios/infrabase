@@ -13,12 +13,12 @@ chrono = "0.4"
 structopt = "0.3"
 log = "0.4"
 env_logger = "0.8"
-itertools = "0.9"
+itertools = "0.10"
 # Upstream stopped development
 natural_sort = { git = "https://github.com/ludios/natural-sort-rs" }
 tabwriter = "1"
-postgres = { version = "0.18", features = ["with-chrono-0_4"] }
-tokio-postgres = { version = "0.6" }
+postgres = { version = "0.19", features = ["with-chrono-0_4"] }
+tokio-postgres = { version = "0.7" }
 anyhow = "1.0"
 
 [profile.dev]
