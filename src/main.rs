@@ -1,5 +1,4 @@
 #![deny(unsafe_code)]
-#![feature(format_args_capture)]
 
 mod wireguard;
 mod nix;
