@@ -312,8 +312,8 @@ fn write_table_cell<T: ToTableCell>(tw: &mut TabWriter<Vec<u8>>, value: T) -> st
     tw.write_all(b"\t")
 }
 
-fn list_machines(mut transaction: &mut Transaction) -> Result<()> {
-    let machines_map = get_machines_with_addresses(&mut transaction)?;
+fn list_machines(transaction: &mut Transaction) -> Result<()> {
+    let machines_map = get_machines_with_addresses(transaction)?;
     let machines = get_sorted_machines(&machines_map);
     let mut tw = TabWriter::new(vec![]);
     let columns = vec!["HOSTNAME", "WG IPV4", "WG IPV6", "OWNER", "PROV", "REFERENCE", "ADDRESSES"];
@@ -342,8 +342,8 @@ fn format_nix_address(address: &MachineAddress) -> String {
     )
 }
 
-fn nix_data(mut transaction: &mut Transaction) -> Result<()> {
-    let machines_map = get_machines_with_addresses(&mut transaction)?;
+fn nix_data(transaction: &mut Transaction) -> Result<()> {
+    let machines_map = get_machines_with_addresses(transaction)?;
     let machines = get_sorted_machines(&machines_map);
 
     println!("{{");
@@ -429,8 +429,8 @@ fn increment_ipv6_address(ip: &Ipv6Addr) -> Option<Ipv6Addr> {
     Some(Ipv6Addr::new(segments[0], segments[1], segments[2], segments[3], segments[4], segments[5], segments[6], segments[7]))
 }
 
-fn get_unused_wireguard_ipv4_address(mut transaction: &mut Transaction, start_ip: Ipv4Addr, end_ip: Ipv4Addr) -> Result<Option<Ipv4Addr>> {
-    let existing = get_existing_wireguard_ipv4_addresses(&mut transaction)?.collect::<HashSet<Ipv4Addr>>();
+fn get_unused_wireguard_ipv4_address(transaction: &mut Transaction, start_ip: Ipv4Addr, end_ip: Ipv4Addr) -> Result<Option<Ipv4Addr>> {
+    let existing = get_existing_wireguard_ipv4_addresses(transaction)?.collect::<HashSet<Ipv4Addr>>();
     let ip_iter = iter::successors(Some(start_ip), increment_ipv4_address);
     for proposed_ip in ip_iter {
         if !existing.contains(&proposed_ip) {
@@ -443,8 +443,8 @@ fn get_unused_wireguard_ipv4_address(mut transaction: &mut Transaction, start_ip
     Ok(None)
 }
 
-fn get_unused_wireguard_ipv6_address(mut transaction: &mut Transaction, start_ip: Ipv6Addr, end_ip: Ipv6Addr) -> Result<Option<Ipv6Addr>> {
-    let existing = get_existing_wireguard_ipv6_addresses(&mut transaction)?.collect::<HashSet<Ipv6Addr>>();
+fn get_unused_wireguard_ipv6_address(transaction: &mut Transaction, start_ip: Ipv6Addr, end_ip: Ipv6Addr) -> Result<Option<Ipv6Addr>> {
+    let existing = get_existing_wireguard_ipv6_addresses(transaction)?.collect::<HashSet<Ipv6Addr>>();
     let ip_iter = iter::successors(Some(start_ip), increment_ipv6_address);
     for proposed_ip in ip_iter {
         if !existing.contains(&proposed_ip) {
@@ -576,12 +576,12 @@ fn get_network_to_network(
     network_to_network
 }
 
-fn print_ssh_config(mut transaction: &mut Transaction, for_machine: &str) -> Result<()> {
-    let machines_map = get_machines_with_addresses(&mut transaction)?;
+fn print_ssh_config(transaction: &mut Transaction, for_machine: &str) -> Result<()> {
+    let machines_map = get_machines_with_addresses(transaction)?;
     let source_machine =
         &machines_map.get(for_machine)
         .ok_or_else(|| anyhow!("machines_map missing {}", for_machine))?;
-    let network_links_priority_map = get_network_links_priority_map(&mut transaction)?;
+    let network_links_priority_map = get_network_links_priority_map(transaction)?;
     let machines = get_sorted_machines(&machines_map);
 
     println!("# infrabase-generated SSH config for {for_machine}\n");
@@ -642,7 +642,7 @@ fn get_wireguard_peers(
             // We don't need a [Peer] for ourselves
             continue;
         }
-        let network_to_network = get_network_to_network(&network_links_priority_map, &source_machine.networks, &machine.addresses);
+        let network_to_network = get_network_to_network(network_links_priority_map, &source_machine.networks, &machine.addresses);
         let endpoint = match network_to_network.get(0) {
             Some((_, dest_network)) => {
                 let desired_address = machine.addresses.iter().find(|a| a.network == *dest_network);
@@ -675,7 +675,7 @@ fn get_wireguard_peers(
     Ok(peers)
 }
 
-fn sort_wireguard_peers(peers: &mut Vec<WireguardPeer>) {
+fn sort_wireguard_peers(peers: &mut [WireguardPeer]) {
     peers.sort_unstable_by(|p1, p2| {
         HumanStr::new(&p1.hostname)
             .partial_cmp(&HumanStr::new(&p2.hostname))
@@ -683,10 +683,10 @@ fn sort_wireguard_peers(peers: &mut Vec<WireguardPeer>) {
     });
 }
 
-fn print_wg_quick(mut transaction: &mut Transaction, for_machine: &str) -> Result<()> {
-    let machines_map = get_machines_with_addresses(&mut transaction)?;
-    let network_links_priority_map = get_network_links_priority_map(&mut transaction)?;
-    let keepalives_map = get_wireguard_keepalive_map(&mut transaction)?;
+fn print_wg_quick(transaction: &mut Transaction, for_machine: &str) -> Result<()> {
+    let machines_map = get_machines_with_addresses(transaction)?;
+    let network_links_priority_map = get_network_links_priority_map(transaction)?;
+    let keepalives_map = get_wireguard_keepalive_map(transaction)?;
     let my_machine = unwrap_or_else!(
         machines_map.get(for_machine),
         bail!("Could not find machine {:?} in database", for_machine)
@@ -740,10 +740,10 @@ fn print_wg_quick(mut transaction: &mut Transaction, for_machine: &str) -> Resul
 }
 
 /// Write a .nix file for each machine listing its WireGuard peers
-fn write_wireguard_peers(mut transaction: &mut Transaction, with_names: bool) -> Result<()> {
-    let machines_map = get_machines_with_addresses(&mut transaction)?;
-    let network_links_priority_map = get_network_links_priority_map(&mut transaction)?;
-    let keepalives_map = get_wireguard_keepalive_map(&mut transaction)?;
+fn write_wireguard_peers(transaction: &mut Transaction, with_names: bool) -> Result<()> {
+    let machines_map = get_machines_with_addresses(transaction)?;
+    let network_links_priority_map = get_network_links_priority_map(transaction)?;
+    let keepalives_map = get_wireguard_keepalive_map(transaction)?;
     let machines = get_sorted_machines(&machines_map);
 
     let path_template = env_var("WIREGUARD_PEERS_PATH_TEMPLATE")?;
