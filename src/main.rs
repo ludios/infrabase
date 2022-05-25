@@ -576,6 +576,18 @@ fn get_network_to_network(
     network_to_network
 }
 
+/// Sort a slice of addresses, best first
+fn sort_addresses(addresses: &mut [&MachineAddress]) {
+    addresses.sort_by_cached_key(|address| {
+        match address.address {
+            // Prefer IPv6 over IPv4 because we seem to have fewer connection resets
+            // and hung SSH connections on Hetzner when using IPv6.
+            IpAddr::V6(..) => 0,
+            IpAddr::V4(..) => 1,
+        }
+    });
+}
+
 fn print_ssh_config(transaction: &mut Transaction, for_machine: &str) -> Result<()> {
     let machines_map = get_machines_with_addresses(transaction)?;
     let source_machine =
@@ -595,7 +607,9 @@ fn print_ssh_config(transaction: &mut Transaction, for_machine: &str) -> Result<
                 (machine.wireguard_ipv4_address.map(IpAddr::V4), machine.ssh_port)
             },
             Some((_, dest_network)) => {
-                let desired_address = machine.addresses.iter().find(|a| a.network == **dest_network).unwrap();
+                let mut desired_addresses: Vec<&MachineAddress> = machine.addresses.iter().filter(|a| a.network == **dest_network).collect();
+                sort_addresses(&mut desired_addresses);
+                let desired_address = desired_addresses[0];
                 (Some(desired_address.address), desired_address.ssh_port)
             }
         };
